@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SSH Chatbot</title>
+    <link rel="stylesheet" href="./node_modules/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="brand">
+            <div class="logo">SSH</div>
+            <div>
+              <div class="title">Site Manager</div>
+              <div class="subtitle">Secure SSH profiles</div>
+            </div>
+          </div>
+          <button id="open-settings" class="ghost">Settings</button>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Saved Sites</div>
+          <div id="site-list" class="site-list"></div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Add Site</div>
+          <div class="form">
+            <input id="site-name" placeholder="Label" />
+            <input id="site-host" placeholder="Host" />
+            <div class="row">
+              <input id="site-port" placeholder="Port" value="22" />
+              <input id="site-user" placeholder="Username" />
+            </div>
+            <input id="site-pass" placeholder="Password" type="password" />
+            <button id="add-site" class="primary">Add Site</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="tabs-bar">
+          <div id="tabs" class="tabs"></div>
+          <button id="new-tab" class="ghost">New Tab</button>
+        </div>
+
+        <div id="tab-content" class="tab-content"></div>
+      </main>
+    </div>
+
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <div class="title">Settings</div>
+            <div class="subtitle">AI + execution preferences</div>
+          </div>
+          <button id="close-settings" class="ghost">Close</button>
+        </div>
+        <div class="modal-body">
+          <label class="field">
+            <span>OpenAI API Key</span>
+            <input id="openai-key" type="password" placeholder="sk-..." />
+          </label>
+
+          <div class="field">
+            <span>Execution Mode</span>
+            <div class="segmented">
+              <button data-mode="ask" class="segmented-btn">Ask Every Time</button>
+              <button data-mode="auto" class="segmented-btn">Run Everything</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Max Retries</span>
+            <input id="max-retries" type="number" min="1" value="10" />
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <input id="model-name" value="gpt-5.2" />
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button id="save-settings" class="primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./node_modules/xterm/lib/xterm.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "ssh-chatbot",
+  "version": "1.0.0",
+  "description": "Modern SSH site manager with AI-assisted terminal",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "electron": "^32.2.0",
+    "ssh2": "^1.16.0",
+    "xterm": "^5.3.0"
+  }
+}
