@@ -2,10 +2,6 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';"
-    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SSH Chatbot</title>
     <link rel="stylesheet" href="./node_modules/xterm/css/xterm.css" />
@@ -22,7 +18,13 @@
               <div class="subtitle">Secure SSH profiles</div>
             </div>
           </div>
-          <button id="open-settings" class="ghost">Settings</button>
+          <button
+            id="open-settings"
+            class="ghost"
+            onclick="document.getElementById('settings-modal').classList.remove('hidden'); if (window.__openSettings) window.__openSettings();"
+          >
+            Settings
+          </button>
         </div>
 
         <div class="section">
@@ -62,7 +64,13 @@
             <div class="title">Settings</div>
             <div class="subtitle">AI + execution preferences</div>
           </div>
-          <button id="close-settings" class="ghost">Close</button>
+          <button
+            id="close-settings"
+            class="ghost"
+            onclick="document.getElementById('settings-modal').classList.add('hidden'); if (window.__closeSettings) window.__closeSettings();"
+          >
+            Close
+          </button>
         </div>
         <div class="modal-body">
           <label class="field">
@@ -86,6 +94,14 @@
           <label class="field">
             <span>Model</span>
             <input id="model-name" value="gpt-5.2" />
+          </label>
+
+          <label class="field">
+            <span>Theme</span>
+            <select id="theme-select">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
           </label>
         </div>
         <div class="modal-footer">

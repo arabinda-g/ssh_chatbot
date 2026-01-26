@@ -11,7 +11,20 @@ const saveSettingsBtn = document.getElementById("save-settings");
 const openaiKeyInput = document.getElementById("openai-key");
 const maxRetriesInput = document.getElementById("max-retries");
 const modelInput = document.getElementById("model-name");
+const themeSelect = document.getElementById("theme-select");
 const modeButtons = document.querySelectorAll(".segmented-btn");
+
+const api = window.api || {
+  sshConnect: async () => ({ ok: false, error: "Not available in browser" }),
+  sshDisconnect: async () => ({ ok: true }),
+  sshWrite: async () => ({ ok: true }),
+  sshExec: async () => ({ ok: false, error: "Not available in browser" }),
+  aiGetCommand: async () => ({ ok: false, error: "Not available in browser" }),
+  aiFixCommand: async () => ({ ok: false, error: "Not available in browser" }),
+  onSshData: () => {},
+  onSshError: () => {},
+  onSshStatus: () => {}
+};
 
 const state = {
   sites: [],
@@ -21,7 +34,8 @@ const state = {
     apiKey: "",
     mode: "ask",
     maxRetries: 10,
-    model: "gpt-5.2"
+    model: "gpt-5.2",
+    theme: "light"
   }
 };
 
@@ -45,6 +59,10 @@ const loadSettings = () => {
 
 const saveSettings = () => {
   localStorage.setItem("settings", JSON.stringify(state.settings));
+};
+
+const applyTheme = () => {
+  document.body.classList.toggle("light-theme", state.settings.theme === "light");
 };
 
 const renderSites = () => {
@@ -108,7 +126,7 @@ const createTab = async (site) => {
 const closeTab = async (tabId) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
-  await window.api.sshDisconnect({ tabId });
+  await api.sshDisconnect({ tabId });
   if (tab.terminal) {
     tab.terminal.dispose();
   }
@@ -122,7 +140,7 @@ const connectTab = async (tab) => {
   if (!tab.site) return;
   tab.status = "Connecting...";
   renderTabs();
-  await window.api.sshConnect({
+  await api.sshConnect({
     tabId: tab.id,
     config: tab.site
   });
@@ -195,7 +213,7 @@ const renderActiveTab = () => {
     });
     tab.terminal.open(terminalContainer);
     tab.terminal.onData((data) => {
-      window.api.sshWrite({ tabId: tab.id, data });
+      api.sshWrite({ tabId: tab.id, data });
     });
   } else {
     tab.terminal.open(terminalContainer);
@@ -249,7 +267,7 @@ const handleChatSend = async (tab) => {
   addChatMessage(tab, "user", prompt);
   addChatMessage(tab, "assistant", "Thinking...");
 
-  const response = await window.api.aiGetCommand({
+  const response = await api.aiGetCommand({
     prompt,
     logs: tab.logs.slice(-4000),
     settings: state.settings
@@ -282,7 +300,7 @@ const runCommandWithRetries = async (tab, prompt, command) => {
       return;
     }
 
-    const result = await window.api.sshExec({
+    const result = await api.sshExec({
       tabId: tab.id,
       command: current
     });
@@ -310,7 +328,7 @@ const runCommandWithRetries = async (tab, prompt, command) => {
 
     addChatMessage(tab, "assistant", "Retrying with fix...");
 
-    const fix = await window.api.aiFixCommand({
+    const fix = await api.aiFixCommand({
       prompt,
       logs: logs || "Unknown error",
       settings: state.settings
@@ -325,7 +343,7 @@ const runCommandWithRetries = async (tab, prompt, command) => {
   }
 };
 
-window.api.onSshData(({ tabId, data }) => {
+api.onSshData(({ tabId, data }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab?.terminal) {
     tab.terminal.write(data);
@@ -338,7 +356,7 @@ window.api.onSshData(({ tabId, data }) => {
   }
 });
 
-window.api.onSshStatus(({ tabId, status }) => {
+api.onSshStatus(({ tabId, status }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab) {
     tab.status = status;
@@ -347,7 +365,7 @@ window.api.onSshStatus(({ tabId, status }) => {
   }
 });
 
-window.api.onSshError(({ tabId, error }) => {
+api.onSshError(({ tabId, error }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab) {
     tab.status = "Error";
@@ -387,18 +405,36 @@ addSiteBtn.addEventListener("click", () => {
 
 newTabBtn.addEventListener("click", () => createTab());
 
-openSettingsBtn.addEventListener("click", () => {
+const showSettings = () => {
+  if (!settingsModal) return;
   settingsModal.classList.remove("hidden");
   openaiKeyInput.value = state.settings.apiKey || "";
   maxRetriesInput.value = state.settings.maxRetries || 10;
   modelInput.value = state.settings.model || "gpt-5.2";
+  themeSelect.value = state.settings.theme || "light";
   modeButtons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === state.settings.mode);
   });
-});
+};
 
-closeSettingsBtn.addEventListener("click", () => {
+const hideSettings = () => {
+  if (!settingsModal) return;
   settingsModal.classList.add("hidden");
+};
+
+window.__openSettings = showSettings;
+window.__closeSettings = hideSettings;
+
+openSettingsBtn?.addEventListener("click", showSettings);
+closeSettingsBtn?.addEventListener("click", hideSettings);
+
+document.addEventListener("click", (e) => {
+  if (e.target?.id === "open-settings") {
+    showSettings();
+  }
+  if (e.target?.id === "close-settings") {
+    hideSettings();
+  }
 });
 
 modeButtons.forEach((btn) => {
@@ -413,12 +449,15 @@ saveSettingsBtn.addEventListener("click", () => {
   state.settings.apiKey = openaiKeyInput.value.trim();
   state.settings.maxRetries = Number(maxRetriesInput.value) || 10;
   state.settings.model = modelInput.value.trim() || "gpt-5.2";
+  state.settings.theme = themeSelect.value || "light";
   saveSettings();
+  applyTheme();
   settingsModal.classList.add("hidden");
 });
 
 loadSites();
 loadSettings();
+applyTheme();
 renderSites();
 renderTabs();
 renderActiveTab();

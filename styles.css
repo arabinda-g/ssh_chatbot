@@ -112,6 +112,14 @@ input {
   color: #e7ecf2;
 }
 
+select {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #e7ecf2;
+}
+
 button {
   border: none;
   padding: 10px 14px;
@@ -299,4 +307,63 @@ button {
 
 .segmented-btn.active {
   background: #1f2937;
+}
+
+body.light-theme {
+  background: #f6f7fb;
+  color: #0f172a;
+}
+
+body.light-theme .sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e2e8f0;
+}
+
+body.light-theme .title,
+body.light-theme .tab,
+body.light-theme .panel-header,
+body.light-theme .chat-message {
+  color: #0f172a;
+}
+
+body.light-theme .subtitle,
+body.light-theme .section-title,
+body.light-theme .status,
+body.light-theme .field {
+  color: #64748b;
+}
+
+body.light-theme .site-card,
+body.light-theme .terminal-panel,
+body.light-theme .chat-panel,
+body.light-theme .modal-card,
+body.light-theme .tab,
+body.light-theme .tabs-bar,
+body.light-theme .ghost,
+body.light-theme input,
+body.light-theme select {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+body.light-theme .tab.active {
+  background: #f1f5f9;
+}
+
+body.light-theme .terminal-panel,
+body.light-theme .chat-panel {
+  background: #f8fafc;
+}
+
+body.light-theme .chat-message {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+body.light-theme .chat-message.user {
+  background: #e2e8f0;
+}
+
+body.light-theme .ghost {
+  color: #0f172a;
 }
