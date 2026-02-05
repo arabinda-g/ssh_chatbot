@@ -311,3 +311,37 @@ ipcMain.handle(
     return { ok: true, command: result.text };
   }
 );
+
+ipcMain.handle(
+  "ai-interpret-output",
+  async (_event, { prompt, command, output, settings }) => {
+    if (!settings?.apiKey) {
+      return { ok: false, error: "Missing OpenAI API key" };
+    }
+
+    const messages = [
+      {
+        role: "system",
+        content:
+          "You are a helpful SSH assistant. The user asked a question, a command was run, and you now have the output. Provide a clear, concise, human-friendly answer to the user's original question based on the command output. Be brief but informative. Do not include the command or raw output in your response unless necessary for clarity. You may use **bold** for emphasis on important values."
+      },
+      {
+        role: "user",
+        content: `User's question: ${prompt}\n\nCommand executed: ${command}\n\nCommand output:\n${output}`
+      }
+    ];
+
+    const result = await callOpenAI({
+      apiKey: settings.apiKey,
+      model: settings.model || "gpt-5.2",
+      messages,
+      maxRetries: 2
+    });
+
+    if (!result.ok) {
+      return result;
+    }
+
+    return { ok: true, answer: result.text };
+  }
+);

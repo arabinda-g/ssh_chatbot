@@ -41,6 +41,7 @@ const sshApi = window.api || {
   sshExec: async () => ({ ok: false, error: "Not available in browser" }),
   aiGetCommand: async () => ({ ok: false, error: "Not available in browser" }),
   aiFixCommand: async () => ({ ok: false, error: "Not available in browser" }),
+  aiInterpretOutput: async () => ({ ok: false, error: "Not available in browser" }),
   onSshData: () => {},
   onSshError: () => {},
   onSshStatus: () => {}
@@ -73,6 +74,21 @@ const escapeHtml = (text) => {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+};
+
+// Simple markdown parser for answer messages
+const parseSimpleMarkdown = (text) => {
+  // First escape HTML
+  let result = escapeHtml(text);
+  // Convert **bold** to <strong>bold</strong>
+  result = result.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Convert *italic* to <em>italic</em>
+  result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // Convert `code` to <code>code</code>
+  result = result.replace(/`(.+?)`/g, "<code>$1</code>");
+  // Convert newlines to <br>
+  result = result.replace(/\n/g, "<br>");
+  return result;
 };
 
 // ========================================
@@ -488,6 +504,19 @@ const renderChat = (tab) => {
         </div>
         <span>Thinking...</span>
       `;
+    } else if (msg.role === "answer") {
+      // Answer messages with an icon
+      bubble.innerHTML = `
+        <div class="answer-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4"/>
+            <path d="M12 8h.01"/>
+          </svg>
+          <span>Answer</span>
+        </div>
+        <div class="answer-content">${parseSimpleMarkdown(msg.text)}</div>
+      `;
     } else {
       bubble.textContent = msg.text;
     }
@@ -623,6 +652,23 @@ const runCommandWithRetries = async (tab, prompt, command) => {
 
     if (result.ok) {
       addChatMessage(tab, "assistant", "✓ Command completed successfully.");
+      
+      // Interpret the output with AI
+      addChatMessage(tab, "assistant", "", true); // Thinking indicator
+      
+      const interpretation = await sshApi.aiInterpretOutput({
+        prompt,
+        command: current,
+        output: result.stdout || "",
+        settings: state.settings
+      });
+      
+      removeThinkingMessage(tab);
+      
+      if (interpretation.ok && interpretation.answer) {
+        addChatMessage(tab, "answer", interpretation.answer);
+      }
+      
       showToast("success", "Command Executed", "The command completed successfully");
       return;
     }

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("api", {
   sshExec: (payload) => ipcRenderer.invoke("ssh-exec", payload),
   aiGetCommand: (payload) => ipcRenderer.invoke("ai-get-command", payload),
   aiFixCommand: (payload) => ipcRenderer.invoke("ai-fix-command", payload),
+  aiInterpretOutput: (payload) => ipcRenderer.invoke("ai-interpret-output", payload),
   onSshData: (handler) => ipcRenderer.on("ssh-data", (_e, data) => handler(data)),
   onSshError: (handler) =>
     ipcRenderer.on("ssh-error", (_e, data) => handler(data)),
