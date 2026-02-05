@@ -368,12 +368,11 @@ const renderActiveTab = () => {
           </svg>
           AI Assistant
         </span>
-        <span class="status info">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 8V4H8"/><rect x="8" y="8" width="8" height="8" rx="1"/>
-          </svg>
-          AI powered
-        </span>
+        <label class="ask-toggle" title="Ask before executing commands">
+          <input type="checkbox" id="ask-toggle-${tab.id}" ${state.settings.mode === "ask" ? "checked" : ""} />
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Ask</span>
+        </label>
       </div>
       <div class="chat-messages" id="chat-${tab.id}"></div>
       <div class="chat-input">
@@ -421,6 +420,7 @@ const renderActiveTab = () => {
   // Event listeners for chat
   const sendBtn = document.getElementById(`chat-send-${tab.id}`);
   const chatInput = document.getElementById(`chat-input-${tab.id}`);
+  const askToggle = document.getElementById(`ask-toggle-${tab.id}`);
   
   sendBtn.addEventListener("click", () => handleChatSend(tab));
   chatInput.addEventListener("keydown", (e) => {
@@ -428,6 +428,12 @@ const renderActiveTab = () => {
       e.preventDefault();
       handleChatSend(tab);
     }
+  });
+
+  // Ask toggle event listener
+  askToggle?.addEventListener("change", (e) => {
+    state.settings.mode = e.target.checked ? "ask" : "auto";
+    saveSettings();
   });
 };
 
@@ -484,9 +490,52 @@ const removeThinkingMessage = (tab) => {
   renderChat(tab);
 };
 
-const shouldRunCommand = (command) => {
-  if (state.settings.mode === "auto") return true;
-  return confirm(`Execute this command?\n\n${command}`);
+const shouldRunCommand = (tab, command) => {
+  if (state.settings.mode === "auto") return Promise.resolve(true);
+  
+  return new Promise((resolve) => {
+    const chatEl = document.getElementById(`chat-${tab.id}`);
+    if (!chatEl) return resolve(false);
+
+    // Create inline confirmation UI
+    const confirmEl = document.createElement("div");
+    confirmEl.className = "chat-confirm";
+    confirmEl.innerHTML = `
+      <div class="confirm-header">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" />
+        </svg>
+        Execute this command?
+      </div>
+      <div class="confirm-command"><code>${escapeHtml(command)}</code></div>
+      <div class="confirm-actions">
+        <button class="confirm-cancel ghost">Cancel</button>
+        <button class="confirm-execute primary">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Execute
+        </button>
+      </div>
+    `;
+
+    chatEl.appendChild(confirmEl);
+    chatEl.scrollTop = chatEl.scrollHeight;
+
+    const cleanup = () => {
+      confirmEl.remove();
+    };
+
+    confirmEl.querySelector(".confirm-cancel").addEventListener("click", () => {
+      cleanup();
+      resolve(false);
+    });
+
+    confirmEl.querySelector(".confirm-execute").addEventListener("click", () => {
+      cleanup();
+      resolve(true);
+    });
+  });
 };
 
 const handleChatSend = async (tab) => {
@@ -533,7 +582,8 @@ const runCommandWithRetries = async (tab, prompt, command) => {
   while (retries < state.settings.maxRetries) {
     addChatMessage(tab, "assistant", `Command: \`${current}\``);
 
-    if (!shouldRunCommand(current)) {
+    const shouldRun = await shouldRunCommand(tab, current);
+    if (!shouldRun) {
       addChatMessage(tab, "assistant", "Execution cancelled by user.");
       return;
     }
