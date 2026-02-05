@@ -339,11 +339,16 @@ body.light-theme .chat-panel,
 body.light-theme .modal-card,
 body.light-theme .tab,
 body.light-theme .tabs-bar,
-body.light-theme .ghost,
+body.light-theme .ghost {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
 body.light-theme input,
 body.light-theme select {
   background: #ffffff;
   border-color: #e2e8f0;
+  color: #0f172a;
 }
 
 body.light-theme .tab.active {
@@ -366,4 +371,30 @@ body.light-theme .chat-message.user {
 
 body.light-theme .ghost {
   color: #0f172a;
+}
+
+body.light-theme .segmented-btn {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+body.light-theme .segmented-btn.active {
+  background: #e2e8f0;
+}
+
+body.light-theme .logo {
+  color: #ffffff;
+}
+
+body.light-theme .site-card .meta span {
+  color: #64748b;
+}
+
+body.light-theme .modal {
+  background: rgba(100, 116, 139, 0.3);
+}
+
+body.light-theme .main {
+  background: #f6f7fb;
 }

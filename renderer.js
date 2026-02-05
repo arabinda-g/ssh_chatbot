@@ -14,7 +14,7 @@ const modelInput = document.getElementById("model-name");
 const themeSelect = document.getElementById("theme-select");
 const modeButtons = document.querySelectorAll(".segmented-btn");
 
-const api = window.api || {
+const sshApi = window.api || {
   sshConnect: async () => ({ ok: false, error: "Not available in browser" }),
   sshDisconnect: async () => ({ ok: true }),
   sshWrite: async () => ({ ok: true }),
@@ -62,7 +62,12 @@ const saveSettings = () => {
 };
 
 const applyTheme = () => {
-  document.body.classList.toggle("light-theme", state.settings.theme === "light");
+  const theme = state.settings.theme || "light";
+  if (theme === "light") {
+    document.body.classList.add("light-theme");
+  } else {
+    document.body.classList.remove("light-theme");
+  }
 };
 
 const renderSites = () => {
@@ -126,7 +131,7 @@ const createTab = async (site) => {
 const closeTab = async (tabId) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
-  await api.sshDisconnect({ tabId });
+  await sshApi.sshDisconnect({ tabId });
   if (tab.terminal) {
     tab.terminal.dispose();
   }
@@ -140,7 +145,7 @@ const connectTab = async (tab) => {
   if (!tab.site) return;
   tab.status = "Connecting...";
   renderTabs();
-  await api.sshConnect({
+  await sshApi.sshConnect({
     tabId: tab.id,
     config: tab.site
   });
@@ -213,7 +218,7 @@ const renderActiveTab = () => {
     });
     tab.terminal.open(terminalContainer);
     tab.terminal.onData((data) => {
-      api.sshWrite({ tabId: tab.id, data });
+      sshApi.sshWrite({ tabId: tab.id, data });
     });
   } else {
     tab.terminal.open(terminalContainer);
@@ -267,7 +272,7 @@ const handleChatSend = async (tab) => {
   addChatMessage(tab, "user", prompt);
   addChatMessage(tab, "assistant", "Thinking...");
 
-  const response = await api.aiGetCommand({
+  const response = await sshApi.aiGetCommand({
     prompt,
     logs: tab.logs.slice(-4000),
     settings: state.settings
@@ -300,7 +305,7 @@ const runCommandWithRetries = async (tab, prompt, command) => {
       return;
     }
 
-    const result = await api.sshExec({
+    const result = await sshApi.sshExec({
       tabId: tab.id,
       command: current
     });
@@ -328,7 +333,7 @@ const runCommandWithRetries = async (tab, prompt, command) => {
 
     addChatMessage(tab, "assistant", "Retrying with fix...");
 
-    const fix = await api.aiFixCommand({
+    const fix = await sshApi.aiFixCommand({
       prompt,
       logs: logs || "Unknown error",
       settings: state.settings
@@ -343,7 +348,7 @@ const runCommandWithRetries = async (tab, prompt, command) => {
   }
 };
 
-api.onSshData(({ tabId, data }) => {
+sshApi.onSshData(({ tabId, data }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab?.terminal) {
     tab.terminal.write(data);
@@ -356,7 +361,7 @@ api.onSshData(({ tabId, data }) => {
   }
 });
 
-api.onSshStatus(({ tabId, status }) => {
+sshApi.onSshStatus(({ tabId, status }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab) {
     tab.status = status;
@@ -365,7 +370,7 @@ api.onSshStatus(({ tabId, status }) => {
   }
 });
 
-api.onSshError(({ tabId, error }) => {
+sshApi.onSshError(({ tabId, error }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab) {
     tab.status = "Error";
@@ -455,9 +460,17 @@ saveSettingsBtn.addEventListener("click", () => {
   settingsModal.classList.add("hidden");
 });
 
-loadSites();
-loadSettings();
-applyTheme();
-renderSites();
-renderTabs();
-renderActiveTab();
+const init = () => {
+  loadSites();
+  loadSettings();
+  applyTheme();
+  renderSites();
+  renderTabs();
+  renderActiveTab();
+};
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}
