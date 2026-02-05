@@ -122,40 +122,89 @@ ipcMain.handle("ssh-write", async (_event, { tabId, data }) => {
 
 ipcMain.handle("ssh-exec", async (event, { tabId, command }) => {
   const entry = connections.get(tabId);
-  if (!entry?.conn) {
-    return { ok: false, error: "Not connected" };
+  if (!entry?.shell) {
+    return { ok: false, error: "Not connected or shell not ready" };
   }
 
   return await new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
+    let output = "";
+    let commandSent = false;
+    let resolved = false;
+    
+    // Prompt patterns for common shells
+    const promptPatterns = [
+      /\[.*@.*\][#$%>]\s*$/m,     // [user@host]# or [user@host]$
+      /\S+@\S+[:~][#$%>]\s*$/m,   // user@host:~$
+      /^[^@\n]+@[^:]+:[^$#]*[#$]\s*$/m  // user@host:/path$
+    ];
+    
+    const hasPrompt = (text) => {
+      return promptPatterns.some((p) => p.test(text));
+    };
 
-    entry.conn.exec(command, (err, stream) => {
-      if (err) {
-        return resolve({ ok: false, error: err.message });
+    // Error patterns to detect command failure
+    const errorPatterns = [
+      /command not found/i,
+      /no such file or directory/i,
+      /permission denied/i,
+      /error:/i,
+      /failed/i,
+      /cannot /i,
+      /unable to/i
+    ];
+    
+    const hasError = (text) => {
+      return errorPatterns.some((p) => p.test(text));
+    };
+
+    const dataHandler = (data) => {
+      const text = data.toString();
+      output += text;
+      
+      // After command is sent, wait for prompt to reappear
+      if (commandSent && !resolved) {
+        // Check if we see a prompt after the command output
+        // Split by lines and check if last non-empty line looks like a prompt
+        const lines = output.split("\n");
+        const lastLine = lines[lines.length - 1] || lines[lines.length - 2] || "";
+        
+        if (hasPrompt(lastLine)) {
+          resolved = true;
+          
+          // Give a tiny delay to ensure everything is flushed
+          setTimeout(() => {
+            entry.shell.removeListener("data", dataHandler);
+            const isError = hasError(output);
+            resolve({
+              ok: !isError,
+              code: isError ? 1 : 0,
+              stdout: output,
+              stderr: ""
+            });
+          }, 100);
+        }
       }
+    };
 
-      stream.on("data", (data) => {
-        const text = data.toString();
-        stdout += text;
-        sendToRenderer(event, "ssh-data", { tabId, data: text });
-      });
+    entry.shell.on("data", dataHandler);
 
-      stream.stderr.on("data", (data) => {
-        const text = data.toString();
-        stderr += text;
-        sendToRenderer(event, "ssh-data", { tabId, data: text });
-      });
+    // Write the command to shell
+    entry.shell.write(command + "\n");
+    commandSent = true;
 
-      stream.on("close", (code) => {
+    // Timeout after 60 seconds
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        entry.shell.removeListener("data", dataHandler);
         resolve({
-          ok: code === 0,
-          code,
-          stdout,
-          stderr
+          ok: false,
+          error: "Command timed out",
+          stdout: output,
+          stderr: ""
         });
-      });
-    });
+      }
+    }, 60000);
   });
 });
 
