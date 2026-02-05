@@ -9,46 +9,75 @@
   </head>
   <body class="light-theme">
     <div class="app">
-      <aside class="sidebar">
-        <div class="sidebar-header">
-          <div class="brand">
-            <div class="logo">SSH</div>
-            <div>
-              <div class="title">Site Manager</div>
-              <div class="subtitle">Secure SSH profiles</div>
+      <!-- Site Manager Modal -->
+      <div id="site-manager-modal" class="modal hidden">
+        <div class="modal-card site-manager-card">
+          <div class="modal-header">
+            <div class="brand">
+              <div class="logo">SSH</div>
+              <div>
+                <div class="title">Site Manager</div>
+                <div class="subtitle">Manage your SSH connections</div>
+              </div>
+            </div>
+            <button id="close-site-manager" class="ghost">Close</button>
+          </div>
+          <div class="site-manager-body">
+            <div class="site-manager-left">
+              <div class="section-title">Saved Sites</div>
+              <div id="site-list" class="site-list"></div>
+              <div class="site-manager-actions">
+                <button id="new-site-btn" class="ghost">New Site</button>
+                <button id="delete-site-btn" class="ghost danger">Delete</button>
+              </div>
+            </div>
+            <div class="site-manager-right">
+              <div class="section-title">Site Details</div>
+              <div id="site-details-form" class="form">
+                <label class="field">
+                  <span>Label</span>
+                  <input id="site-name" placeholder="My Server" />
+                </label>
+                <label class="field">
+                  <span>Host</span>
+                  <input id="site-host" placeholder="example.com or IP address" />
+                </label>
+                <div class="row">
+                  <label class="field">
+                    <span>Port</span>
+                    <input id="site-port" placeholder="22" value="22" />
+                  </label>
+                  <label class="field">
+                    <span>Username</span>
+                    <input id="site-user" placeholder="root" />
+                  </label>
+                </div>
+                <label class="field">
+                  <span>Password</span>
+                  <input id="site-pass" placeholder="••••••••" type="password" />
+                </label>
+              </div>
+              <div id="no-site-selected" class="no-site-message">
+                <span>Select a site or create a new one</span>
+              </div>
             </div>
           </div>
-          <button
-            id="open-settings"
-            class="ghost"
-            onclick="document.getElementById('settings-modal').classList.remove('hidden'); if (window.__openSettings) window.__openSettings();"
-          >
-            Settings
-          </button>
-        </div>
-
-        <div class="section">
-          <div class="section-title">Saved Sites</div>
-          <div id="site-list" class="site-list"></div>
-        </div>
-
-        <div class="section">
-          <div class="section-title">Add Site</div>
-          <div class="form">
-            <input id="site-name" placeholder="Label" />
-            <input id="site-host" placeholder="Host" />
-            <div class="row">
-              <input id="site-port" placeholder="Port" value="22" />
-              <input id="site-user" placeholder="Username" />
-            </div>
-            <input id="site-pass" placeholder="Password" type="password" />
-            <button id="add-site" class="primary">Add Site</button>
+          <div class="modal-footer site-manager-footer">
+            <button id="save-site-btn" class="ghost">Save</button>
+            <button id="connect-site-btn" class="primary">Connect</button>
           </div>
         </div>
-      </aside>
+      </div>
 
-      <main class="main">
+      <main class="main full-width">
         <div class="tabs-bar">
+          <div class="tabs-left">
+            <button id="open-site-manager" class="site-manager-btn">
+              <div class="logo-small">SSH</div>
+              <span>Site Manager</span>
+            </button>
+            <button id="open-settings" class="ghost">Settings</button>
+          </div>
           <div id="tabs" class="tabs"></div>
           <button id="new-tab" class="ghost">New Tab</button>
         </div>
@@ -64,13 +93,7 @@
             <div class="title">Settings</div>
             <div class="subtitle">AI + execution preferences</div>
           </div>
-          <button
-            id="close-settings"
-            class="ghost"
-            onclick="document.getElementById('settings-modal').classList.add('hidden'); if (window.__closeSettings) window.__closeSettings();"
-          >
-            Close
-          </button>
+          <button id="close-settings" class="ghost">Close</button>
         </div>
         <div class="modal-body">
           <label class="field">

@@ -1,9 +1,20 @@
 const siteListEl = document.getElementById("site-list");
-const addSiteBtn = document.getElementById("add-site");
 const newTabBtn = document.getElementById("new-tab");
 const tabsEl = document.getElementById("tabs");
 const tabContentEl = document.getElementById("tab-content");
 
+// Site Manager Modal elements
+const siteManagerModal = document.getElementById("site-manager-modal");
+const openSiteManagerBtn = document.getElementById("open-site-manager");
+const closeSiteManagerBtn = document.getElementById("close-site-manager");
+const newSiteBtn = document.getElementById("new-site-btn");
+const deleteSiteBtn = document.getElementById("delete-site-btn");
+const saveSiteBtn = document.getElementById("save-site-btn");
+const connectSiteBtn = document.getElementById("connect-site-btn");
+const siteDetailsForm = document.getElementById("site-details-form");
+const noSiteSelected = document.getElementById("no-site-selected");
+
+// Settings Modal elements
 const settingsModal = document.getElementById("settings-modal");
 const openSettingsBtn = document.getElementById("open-settings");
 const closeSettingsBtn = document.getElementById("close-settings");
@@ -30,6 +41,8 @@ const state = {
   sites: [],
   tabs: [],
   activeTabId: null,
+  selectedSiteId: null,
+  isNewSite: false,
   settings: {
     apiKey: "",
     mode: "ask",
@@ -75,6 +88,8 @@ const renderSites = () => {
   if (state.sites.length === 0) {
     const empty = document.createElement("div");
     empty.className = "subtitle";
+    empty.style.padding = "12px";
+    empty.style.textAlign = "center";
     empty.textContent = "No sites yet.";
     siteListEl.appendChild(empty);
     return;
@@ -82,28 +97,66 @@ const renderSites = () => {
 
   state.sites.forEach((site) => {
     const card = document.createElement("div");
-    card.className = "site-card";
+    card.className = `site-card ${site.id === state.selectedSiteId ? "selected" : ""}`;
     card.innerHTML = `
       <div class="meta">
         <strong>${site.name}</strong>
         <span>${site.username}@${site.host}:${site.port}</span>
       </div>
-      <div class="row">
-        <button class="ghost" data-action="connect">Connect</button>
-        <button class="ghost" data-action="delete">Delete</button>
-      </div>
     `;
 
-    card.querySelector('[data-action="connect"]').addEventListener("click", () => {
-      createTab(site);
+    card.addEventListener("click", () => {
+      selectSite(site.id);
     });
-    card.querySelector('[data-action="delete"]').addEventListener("click", () => {
-      state.sites = state.sites.filter((s) => s.id !== site.id);
-      saveSites();
-      renderSites();
+
+    card.addEventListener("dblclick", () => {
+      selectSite(site.id);
+      connectSelectedSite();
     });
+
     siteListEl.appendChild(card);
   });
+};
+
+const selectSite = (siteId) => {
+  state.selectedSiteId = siteId;
+  state.isNewSite = false;
+  renderSites();
+  updateSiteDetailsForm();
+};
+
+const updateSiteDetailsForm = () => {
+  const site = state.sites.find((s) => s.id === state.selectedSiteId);
+  
+  if (site || state.isNewSite) {
+    siteDetailsForm.classList.remove("hidden");
+    noSiteSelected.classList.add("hidden");
+    
+    document.getElementById("site-name").value = site?.name || "";
+    document.getElementById("site-host").value = site?.host || "";
+    document.getElementById("site-port").value = site?.port || "22";
+    document.getElementById("site-user").value = site?.username || "";
+    document.getElementById("site-pass").value = site?.password || "";
+  } else {
+    siteDetailsForm.classList.add("hidden");
+    noSiteSelected.classList.remove("hidden");
+  }
+};
+
+const clearSiteForm = () => {
+  document.getElementById("site-name").value = "";
+  document.getElementById("site-host").value = "";
+  document.getElementById("site-port").value = "22";
+  document.getElementById("site-user").value = "";
+  document.getElementById("site-pass").value = "";
+};
+
+const connectSelectedSite = () => {
+  const site = state.sites.find((s) => s.id === state.selectedSiteId);
+  if (site) {
+    hideSiteManager();
+    createTab(site);
+  }
 };
 
 const createTab = async (site) => {
@@ -380,7 +433,48 @@ sshApi.onSshError(({ tabId, error }) => {
   }
 });
 
-addSiteBtn.addEventListener("click", () => {
+// Site Manager Modal functions
+const showSiteManager = () => {
+  if (!siteManagerModal) return;
+  siteManagerModal.classList.remove("hidden");
+  state.selectedSiteId = null;
+  state.isNewSite = false;
+  renderSites();
+  updateSiteDetailsForm();
+};
+
+const hideSiteManager = () => {
+  if (!siteManagerModal) return;
+  siteManagerModal.classList.add("hidden");
+  state.selectedSiteId = null;
+  state.isNewSite = false;
+};
+
+// Site Manager event listeners
+openSiteManagerBtn?.addEventListener("click", showSiteManager);
+closeSiteManagerBtn?.addEventListener("click", hideSiteManager);
+
+newSiteBtn?.addEventListener("click", () => {
+  state.selectedSiteId = null;
+  state.isNewSite = true;
+  clearSiteForm();
+  siteDetailsForm.classList.remove("hidden");
+  noSiteSelected.classList.add("hidden");
+  renderSites();
+  document.getElementById("site-name").focus();
+});
+
+deleteSiteBtn?.addEventListener("click", () => {
+  if (!state.selectedSiteId) return;
+  state.sites = state.sites.filter((s) => s.id !== state.selectedSiteId);
+  saveSites();
+  state.selectedSiteId = null;
+  state.isNewSite = false;
+  renderSites();
+  updateSiteDetailsForm();
+});
+
+saveSiteBtn?.addEventListener("click", () => {
   const name = document.getElementById("site-name").value.trim();
   const host = document.getElementById("site-host").value.trim();
   const port = document.getElementById("site-port").value.trim();
@@ -389,23 +483,48 @@ addSiteBtn.addEventListener("click", () => {
 
   if (!name || !host || !username) return;
 
-  state.sites.push({
-    id: uid(),
-    name,
-    host,
-    port: port || "22",
-    username,
-    password
-  });
+  if (state.isNewSite) {
+    // Create new site
+    const newId = uid();
+    state.sites.push({
+      id: newId,
+      name,
+      host,
+      port: port || "22",
+      username,
+      password
+    });
+    state.selectedSiteId = newId;
+    state.isNewSite = false;
+  } else if (state.selectedSiteId) {
+    // Update existing site
+    const site = state.sites.find((s) => s.id === state.selectedSiteId);
+    if (site) {
+      site.name = name;
+      site.host = host;
+      site.port = port || "22";
+      site.username = username;
+      site.password = password;
+    }
+  }
 
   saveSites();
   renderSites();
+});
 
-  document.getElementById("site-name").value = "";
-  document.getElementById("site-host").value = "";
-  document.getElementById("site-port").value = "22";
-  document.getElementById("site-user").value = "";
-  document.getElementById("site-pass").value = "";
+connectSiteBtn?.addEventListener("click", () => {
+  // If we have unsaved changes for a new site, save first
+  if (state.isNewSite) {
+    const name = document.getElementById("site-name").value.trim();
+    const host = document.getElementById("site-host").value.trim();
+    const username = document.getElementById("site-user").value.trim();
+    
+    if (name && host && username) {
+      saveSiteBtn.click();
+    }
+  }
+  
+  connectSelectedSite();
 });
 
 newTabBtn.addEventListener("click", () => createTab());
@@ -433,11 +552,15 @@ window.__closeSettings = hideSettings;
 openSettingsBtn?.addEventListener("click", showSettings);
 closeSettingsBtn?.addEventListener("click", hideSettings);
 
-document.addEventListener("click", (e) => {
-  if (e.target?.id === "open-settings") {
-    showSettings();
+// Close modals when clicking outside
+siteManagerModal?.addEventListener("click", (e) => {
+  if (e.target === siteManagerModal) {
+    hideSiteManager();
   }
-  if (e.target?.id === "close-settings") {
+});
+
+settingsModal?.addEventListener("click", (e) => {
+  if (e.target === settingsModal) {
     hideSettings();
   }
 });

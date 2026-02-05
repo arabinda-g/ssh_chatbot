@@ -10,24 +10,9 @@ body {
 }
 
 .app {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  height: 100vh;
-}
-
-.sidebar {
-  background: #111826;
-  border-right: 1px solid #1f2937;
-  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-}
-
-.sidebar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  height: 100vh;
 }
 
 .brand {
@@ -148,16 +133,48 @@ button {
 .tabs-bar {
   display: flex;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 12px 20px;
   border-bottom: 1px solid #1f2937;
   background: #0f172a;
   align-items: center;
+  gap: 16px;
+}
+
+.tabs-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.site-manager-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, #6366f1, #22d3ee);
+  color: #0b0f14;
+  font-weight: 600;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+}
+
+.logo-small {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 11px;
 }
 
 .tabs {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  flex: 1;
 }
 
 .tab {
@@ -285,6 +302,132 @@ button {
   gap: 16px;
 }
 
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #1f2937;
+}
+
+/* Site Manager Modal */
+.site-manager-card {
+  width: 720px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+
+.site-manager-body {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 20px;
+  min-height: 320px;
+}
+
+.site-manager-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.site-manager-left .site-list {
+  flex: 1;
+  max-height: none;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 8px;
+  background: #0b1220;
+}
+
+.site-manager-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.site-manager-actions button {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.site-manager-right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+}
+
+.site-manager-right .form {
+  flex: 1;
+}
+
+.site-manager-footer {
+  margin-top: 8px;
+}
+
+.no-site-message {
+  position: absolute;
+  inset: 30px 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.no-site-message.hidden {
+  display: none;
+}
+
+#site-details-form.hidden {
+  display: none;
+}
+
+/* Site card in modal */
+.site-card {
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.site-card:hover {
+  background: #1a2744;
+  border-color: #334155;
+}
+
+.site-card.selected {
+  background: #1e3a5f;
+  border-color: #3b82f6;
+}
+
+.site-card .meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.site-card .meta strong {
+  font-size: 13px;
+}
+
+.site-card .meta span {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.ghost.danger {
+  color: #f87171;
+  border-color: #7f1d1d;
+}
+
+.ghost.danger:hover {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -397,4 +540,50 @@ body.light-theme .modal {
 
 body.light-theme .main {
   background: #f6f7fb;
+}
+
+body.light-theme .site-manager-left .site-list {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+body.light-theme .site-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+body.light-theme .site-card:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+body.light-theme .site-card.selected {
+  background: #dbeafe;
+  border-color: #3b82f6;
+}
+
+body.light-theme .site-card .meta span {
+  color: #64748b;
+}
+
+body.light-theme .no-site-message {
+  color: #94a3b8;
+}
+
+body.light-theme .ghost.danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+body.light-theme .ghost.danger:hover {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+body.light-theme .modal-footer {
+  border-color: #e2e8f0;
+}
+
+body.light-theme .site-manager-btn {
+  color: #ffffff;
 }
