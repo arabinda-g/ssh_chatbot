@@ -407,12 +407,30 @@ const renderActiveTab = () => {
         selectionBackground: "rgba(59, 130, 246, 0.3)"
       }
     });
+    
+    // Create and load FitAddon
+    const fitAddon = new FitAddon.FitAddon();
+    tab.terminal.loadAddon(fitAddon);
+    tab.fitAddon = fitAddon;
+    
     tab.terminal.open(terminalContainer);
+    
+    // Fit terminal to container
+    setTimeout(() => {
+      fitAddon.fit();
+    }, 50);
+    
     tab.terminal.onData((data) => {
       sshApi.sshWrite({ tabId: tab.id, data });
     });
   } else {
     tab.terminal.open(terminalContainer);
+    // Re-fit terminal after re-opening
+    if (tab.fitAddon) {
+      setTimeout(() => {
+        tab.fitAddon.fit();
+      }, 50);
+    }
   }
 
   renderChat(tab);
@@ -891,6 +909,26 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     closeTab(state.activeTabId);
   }
+});
+
+// ========================================
+// Window Resize Handler
+// ========================================
+let resizeTimeout;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    // Re-fit all terminal addons on resize
+    state.tabs.forEach((tab) => {
+      if (tab.fitAddon && tab.terminal) {
+        try {
+          tab.fitAddon.fit();
+        } catch (e) {
+          // Ignore fit errors
+        }
+      }
+    });
+  }, 100);
 });
 
 // ========================================

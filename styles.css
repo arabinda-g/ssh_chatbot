@@ -541,6 +541,31 @@ select {
   padding: 8px;
   background: #0a0e14;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Ensure xterm.js fills the terminal body */
+.terminal-body .xterm {
+  height: 100%;
+}
+
+.terminal-body .xterm-viewport {
+  background-color: #0a0e14 !important;
+}
+
+.terminal-body .xterm-screen {
+  height: 100% !important;
+}
+
+/* Light theme terminal */
+body.light-theme .terminal-body {
+  background: #f8fafc;
+}
+
+body.light-theme .terminal-body .xterm-viewport {
+  background-color: #f8fafc !important;
 }
 
 /* Chat Panel */
