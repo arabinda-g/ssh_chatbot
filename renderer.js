@@ -1,3 +1,6 @@
+// ========================================
+// DOM Elements
+// ========================================
 const siteListEl = document.getElementById("site-list");
 const newTabBtn = document.getElementById("new-tab");
 const tabsEl = document.getElementById("tabs");
@@ -25,6 +28,12 @@ const modelInput = document.getElementById("model-name");
 const themeSelect = document.getElementById("theme-select");
 const modeButtons = document.querySelectorAll(".segmented-btn");
 
+// Toast container
+const toastContainer = document.getElementById("toast-container");
+
+// ========================================
+// API Interface
+// ========================================
 const sshApi = window.api || {
   sshConnect: async () => ({ ok: false, error: "Not available in browser" }),
   sshDisconnect: async () => ({ ok: true }),
@@ -37,6 +46,9 @@ const sshApi = window.api || {
   onSshStatus: () => {}
 };
 
+// ========================================
+// State Management
+// ========================================
 const state = {
   sites: [],
   tabs: [],
@@ -52,8 +64,48 @@ const state = {
   }
 };
 
+// ========================================
+// Utility Functions
+// ========================================
 const uid = () => Math.random().toString(36).slice(2, 10);
 
+const escapeHtml = (text) => {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+};
+
+// ========================================
+// Toast Notifications
+// ========================================
+const showToast = (type, title, message, duration = 4000) => {
+  const icons = {
+    success: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
+    error: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
+    info: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`
+  };
+
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    ${icons[type]}
+    <div class="toast-content">
+      <div class="toast-title">${escapeHtml(title)}</div>
+      ${message ? `<div class="toast-message">${escapeHtml(message)}</div>` : ""}
+    </div>
+  `;
+
+  toastContainer.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.animation = "toastSlide 0.3s ease reverse";
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+};
+
+// ========================================
+// Storage Functions
+// ========================================
 const loadSites = () => {
   const raw = localStorage.getItem("sites");
   state.sites = raw ? JSON.parse(raw) : [];
@@ -74,6 +126,9 @@ const saveSettings = () => {
   localStorage.setItem("settings", JSON.stringify(state.settings));
 };
 
+// ========================================
+// Theme Management
+// ========================================
 const applyTheme = () => {
   const theme = state.settings.theme || "light";
   if (theme === "light") {
@@ -83,14 +138,23 @@ const applyTheme = () => {
   }
 };
 
+// ========================================
+// Site Manager Functions
+// ========================================
 const renderSites = () => {
   siteListEl.innerHTML = "";
+  
   if (state.sites.length === 0) {
     const empty = document.createElement("div");
-    empty.className = "subtitle";
-    empty.style.padding = "12px";
-    empty.style.textAlign = "center";
-    empty.textContent = "No sites yet.";
+    empty.className = "empty-state";
+    empty.style.padding = "24px 12px";
+    empty.innerHTML = `
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="4" width="20" height="16" rx="2"/>
+        <path d="m9 10 3 3-3 3"/>
+      </svg>
+      <p style="font-size: 12px; margin-top: 8px;">No saved sites yet</p>
+    `;
     siteListEl.appendChild(empty);
     return;
   }
@@ -99,16 +163,19 @@ const renderSites = () => {
     const card = document.createElement("div");
     card.className = `site-card ${site.id === state.selectedSiteId ? "selected" : ""}`;
     card.innerHTML = `
+      <div class="site-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2"/>
+          <path d="m9 10 3 3-3 3"/>
+        </svg>
+      </div>
       <div class="meta">
-        <strong>${site.name}</strong>
-        <span>${site.username}@${site.host}:${site.port}</span>
+        <strong>${escapeHtml(site.name)}</strong>
+        <span>${escapeHtml(site.username)}@${escapeHtml(site.host)}:${site.port}</span>
       </div>
     `;
 
-    card.addEventListener("click", () => {
-      selectSite(site.id);
-    });
-
+    card.addEventListener("click", () => selectSite(site.id));
     card.addEventListener("dblclick", () => {
       selectSite(site.id);
       connectSelectedSite();
@@ -127,11 +194,11 @@ const selectSite = (siteId) => {
 
 const updateSiteDetailsForm = () => {
   const site = state.sites.find((s) => s.id === state.selectedSiteId);
-  
+
   if (site || state.isNewSite) {
     siteDetailsForm.classList.remove("hidden");
     noSiteSelected.classList.add("hidden");
-    
+
     document.getElementById("site-name").value = site?.name || "";
     document.getElementById("site-host").value = site?.host || "";
     document.getElementById("site-port").value = site?.port || "22";
@@ -159,13 +226,17 @@ const connectSelectedSite = () => {
   }
 };
 
+// ========================================
+// Tab Management
+// ========================================
 const createTab = async (site) => {
   const tabId = uid();
   const tab = {
     id: tabId,
     title: site ? site.name : `Tab ${state.tabs.length + 1}`,
     site,
-    status: "Disconnected",
+    status: "disconnected",
+    statusText: "Disconnected",
     terminal: null,
     logs: "",
     chat: []
@@ -184,10 +255,12 @@ const createTab = async (site) => {
 const closeTab = async (tabId) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
+  
   await sshApi.sshDisconnect({ tabId });
   if (tab.terminal) {
     tab.terminal.dispose();
   }
+  
   state.tabs = state.tabs.filter((t) => t.id !== tabId);
   state.activeTabId = state.tabs[0]?.id || null;
   renderTabs();
@@ -196,8 +269,12 @@ const closeTab = async (tabId) => {
 
 const connectTab = async (tab) => {
   if (!tab.site) return;
-  tab.status = "Connecting...";
+  
+  tab.status = "connecting";
+  tab.statusText = "Connecting...";
   renderTabs();
+  renderActiveTab();
+  
   await sshApi.sshConnect({
     tabId: tab.id,
     config: tab.site
@@ -206,23 +283,32 @@ const connectTab = async (tab) => {
 
 const renderTabs = () => {
   tabsEl.innerHTML = "";
+  
   state.tabs.forEach((tab) => {
     const tabBtn = document.createElement("div");
     tabBtn.className = `tab ${tab.id === state.activeTabId ? "active" : ""}`;
     tabBtn.innerHTML = `
-      <span>${tab.title}</span>
-      <span class="status">${tab.status}</span>
-      <button class="ghost" data-action="close">x</button>
+      <span class="tab-title">${escapeHtml(tab.title)}</span>
+      <span class="status">
+        <span class="status-dot ${tab.status}"></span>
+        ${escapeHtml(tab.statusText)}
+      </span>
+      <button class="close-btn" data-action="close" title="Close tab">×</button>
     `;
-    tabBtn.addEventListener("click", () => {
-      state.activeTabId = tab.id;
-      renderTabs();
-      renderActiveTab();
+    
+    tabBtn.addEventListener("click", (e) => {
+      if (!e.target.closest('[data-action="close"]')) {
+        state.activeTabId = tab.id;
+        renderTabs();
+        renderActiveTab();
+      }
     });
+    
     tabBtn.querySelector('[data-action="close"]').addEventListener("click", (e) => {
       e.stopPropagation();
       closeTab(tab.id);
     });
+    
     tabsEl.appendChild(tabBtn);
   });
 };
@@ -230,8 +316,25 @@ const renderTabs = () => {
 const renderActiveTab = () => {
   tabContentEl.innerHTML = "";
   const tab = state.tabs.find((t) => t.id === state.activeTabId);
+  
   if (!tab) {
-    tabContentEl.innerHTML = `<div class="subtitle">Create a new tab to start.</div>`;
+    tabContentEl.innerHTML = `
+      <div class="empty-state">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2"/>
+          <path d="m9 10 3 3-3 3"/>
+          <path d="M14 16h2"/>
+        </svg>
+        <h3>No Active Session</h3>
+        <p>Open the Site Manager to connect to a server, or create a new tab to get started.</p>
+        <button class="primary" onclick="document.getElementById('open-site-manager').click()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14"/><path d="M5 12h14"/>
+          </svg>
+          Open Site Manager
+        </button>
+      </div>
+    `;
     return;
   }
 
@@ -240,33 +343,69 @@ const renderActiveTab = () => {
   wrapper.innerHTML = `
     <div class="terminal-panel">
       <div class="panel-header">
-        <span>Terminal</span>
-        <span class="status">${tab.status}</span>
+        <span class="panel-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"/>
+            <line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+          Terminal
+        </span>
+        <span class="status ${tab.status}">
+          <span class="status-dot ${tab.status}"></span>
+          ${escapeHtml(tab.statusText)}
+        </span>
       </div>
       <div class="terminal-body" id="terminal-${tab.id}"></div>
     </div>
     <div class="chat-panel">
       <div class="panel-header">
-        <span>Chatbox</span>
-        <span class="status">AI assisted</span>
+        <span class="panel-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8V4H8"/>
+            <rect x="8" y="8" width="8" height="8" rx="1"/>
+            <path d="M16 12h4v4"/>
+            <path d="M4 12v4h4"/>
+          </svg>
+          AI Assistant
+        </span>
+        <span class="status info">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8V4H8"/><rect x="8" y="8" width="8" height="8" rx="1"/>
+          </svg>
+          AI powered
+        </span>
       </div>
       <div class="chat-messages" id="chat-${tab.id}"></div>
       <div class="chat-input">
-        <input id="chat-input-${tab.id}" placeholder="Ask to run command..." />
-        <button class="primary" id="chat-send-${tab.id}">Send</button>
+        <input id="chat-input-${tab.id}" placeholder="Ask AI to run a command..." />
+        <button class="primary" id="chat-send-${tab.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+          Send
+        </button>
       </div>
     </div>
   `;
   tabContentEl.appendChild(wrapper);
 
+  // Initialize terminal
   const terminalContainer = document.getElementById(`terminal-${tab.id}`);
+  const isDark = !document.body.classList.contains("light-theme");
+  
   if (!tab.terminal) {
     tab.terminal = new Terminal({
       cursorBlink: true,
       fontSize: 13,
+      fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+      lineHeight: 1.4,
       theme: {
-        background: "#0b1220",
-        foreground: "#e7ecf2"
+        background: isDark ? "#0a0e14" : "#f8fafc",
+        foreground: isDark ? "#e7ecf2" : "#0f172a",
+        cursor: isDark ? "#3b82f6" : "#3b82f6",
+        cursorAccent: isDark ? "#0a0e14" : "#f8fafc",
+        selectionBackground: "rgba(59, 130, 246, 0.3)"
       }
     });
     tab.terminal.open(terminalContainer);
@@ -279,51 +418,90 @@ const renderActiveTab = () => {
 
   renderChat(tab);
 
+  // Event listeners for chat
   const sendBtn = document.getElementById(`chat-send-${tab.id}`);
+  const chatInput = document.getElementById(`chat-input-${tab.id}`);
+  
   sendBtn.addEventListener("click", () => handleChatSend(tab));
-  const input = document.getElementById(`chat-input-${tab.id}`);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+  chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       handleChatSend(tab);
     }
   });
 };
 
+// ========================================
+// Chat Functions
+// ========================================
 const renderChat = (tab) => {
   const chatEl = document.getElementById(`chat-${tab.id}`);
   if (!chatEl) return;
+  
   chatEl.innerHTML = "";
+  
+  if (tab.chat.length === 0) {
+    chatEl.innerHTML = `
+      <div class="empty-state" style="padding: 32px 16px;">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <p style="font-size: 12px; margin-top: 12px;">Ask AI to help you run commands</p>
+      </div>
+    `;
+    return;
+  }
+  
   tab.chat.forEach((msg) => {
     const bubble = document.createElement("div");
     bubble.className = `chat-message ${msg.role}`;
-    bubble.textContent = msg.text;
+    
+    if (msg.isThinking) {
+      bubble.classList.add("thinking");
+      bubble.innerHTML = `
+        <div class="typing-indicator">
+          <span></span><span></span><span></span>
+        </div>
+        <span>Thinking...</span>
+      `;
+    } else {
+      bubble.textContent = msg.text;
+    }
+    
     chatEl.appendChild(bubble);
   });
+  
   chatEl.scrollTop = chatEl.scrollHeight;
 };
 
-const addChatMessage = (tab, role, text) => {
-  tab.chat.push({ role, text });
+const addChatMessage = (tab, role, text, isThinking = false) => {
+  tab.chat.push({ role, text, isThinking });
+  renderChat(tab);
+};
+
+const removeThinkingMessage = (tab) => {
+  tab.chat = tab.chat.filter((msg) => !msg.isThinking);
   renderChat(tab);
 };
 
 const shouldRunCommand = (command) => {
   if (state.settings.mode === "auto") return true;
-  return confirm(`Run this command?\n\n${command}`);
+  return confirm(`Execute this command?\n\n${command}`);
 };
 
 const handleChatSend = async (tab) => {
   const input = document.getElementById(`chat-input-${tab.id}`);
   const prompt = input.value.trim();
   if (!prompt) return;
+  
   if (!tab.site) {
-    addChatMessage(tab, "assistant", "Connect to a site first.");
+    addChatMessage(tab, "assistant", "Please connect to a server first.");
     return;
   }
+  
   input.value = "";
-
   addChatMessage(tab, "user", prompt);
-  addChatMessage(tab, "assistant", "Thinking...");
+  addChatMessage(tab, "assistant", "", true); // Thinking indicator
 
   const response = await sshApi.aiGetCommand({
     prompt,
@@ -331,15 +509,17 @@ const handleChatSend = async (tab) => {
     settings: state.settings
   });
 
-  tab.chat = tab.chat.filter((msg) => msg.text !== "Thinking...");
+  removeThinkingMessage(tab);
+  
   if (!response.ok) {
-    addChatMessage(tab, "assistant", response.error || "AI failed.");
+    addChatMessage(tab, "assistant", response.error || "AI request failed.");
+    showToast("error", "AI Error", response.error || "Failed to get command");
     return;
   }
 
   let command = response.command;
   if (!command) {
-    addChatMessage(tab, "assistant", "No command returned.");
+    addChatMessage(tab, "assistant", "No command was returned by the AI.");
     return;
   }
 
@@ -351,10 +531,10 @@ const runCommandWithRetries = async (tab, prompt, command) => {
   let current = command;
 
   while (retries < state.settings.maxRetries) {
-    addChatMessage(tab, "assistant", `Command: ${current}`);
+    addChatMessage(tab, "assistant", `Command: \`${current}\``);
 
     if (!shouldRunCommand(current)) {
-      addChatMessage(tab, "assistant", "Execution canceled.");
+      addChatMessage(tab, "assistant", "Execution cancelled by user.");
       return;
     }
 
@@ -374,17 +554,20 @@ const runCommandWithRetries = async (tab, prompt, command) => {
     tab.logs += `\n$ ${current}\n${logs}\n`;
 
     if (result.ok) {
-      addChatMessage(tab, "assistant", "Completed.");
+      addChatMessage(tab, "assistant", "✓ Command completed successfully.");
+      showToast("success", "Command Executed", "The command completed successfully");
       return;
     }
 
     retries += 1;
     if (retries >= state.settings.maxRetries) {
-      addChatMessage(tab, "assistant", "Max retries reached.");
+      addChatMessage(tab, "assistant", "Maximum retries reached. Please try manually.");
+      showToast("error", "Max Retries", "The command failed after multiple attempts");
       return;
     }
 
-    addChatMessage(tab, "assistant", "Retrying with fix...");
+    addChatMessage(tab, "assistant", "Command failed. Attempting to fix...");
+    addChatMessage(tab, "assistant", "", true); // Thinking indicator
 
     const fix = await sshApi.aiFixCommand({
       prompt,
@@ -392,8 +575,10 @@ const runCommandWithRetries = async (tab, prompt, command) => {
       settings: state.settings
     });
 
+    removeThinkingMessage(tab);
+
     if (!fix.ok || !fix.command) {
-      addChatMessage(tab, "assistant", fix.error || "No fix returned.");
+      addChatMessage(tab, "assistant", fix.error || "Could not generate a fix.");
       return;
     }
 
@@ -401,6 +586,9 @@ const runCommandWithRetries = async (tab, prompt, command) => {
   }
 };
 
+// ========================================
+// SSH Event Handlers
+// ========================================
 sshApi.onSshData(({ tabId, data }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab?.terminal) {
@@ -417,7 +605,16 @@ sshApi.onSshData(({ tabId, data }) => {
 sshApi.onSshStatus(({ tabId, status }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab) {
-    tab.status = status;
+    const statusLower = status.toLowerCase();
+    if (statusLower.includes("connected") && !statusLower.includes("dis")) {
+      tab.status = "connected";
+      showToast("success", "Connected", `Connected to ${tab.title}`);
+    } else if (statusLower.includes("connecting")) {
+      tab.status = "connecting";
+    } else {
+      tab.status = "disconnected";
+    }
+    tab.statusText = status;
     renderTabs();
     renderActiveTab();
   }
@@ -426,14 +623,18 @@ sshApi.onSshStatus(({ tabId, status }) => {
 sshApi.onSshError(({ tabId, error }) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (tab) {
-    tab.status = "Error";
-    addChatMessage(tab, "assistant", error);
+    tab.status = "error";
+    tab.statusText = "Error";
+    addChatMessage(tab, "assistant", `Connection error: ${error}`);
+    showToast("error", "Connection Error", error);
     renderTabs();
     renderActiveTab();
   }
 });
 
-// Site Manager Modal functions
+// ========================================
+// Site Manager Modal
+// ========================================
 const showSiteManager = () => {
   if (!siteManagerModal) return;
   siteManagerModal.classList.remove("hidden");
@@ -450,7 +651,6 @@ const hideSiteManager = () => {
   state.isNewSite = false;
 };
 
-// Site Manager event listeners
 openSiteManagerBtn?.addEventListener("click", showSiteManager);
 closeSiteManagerBtn?.addEventListener("click", hideSiteManager);
 
@@ -465,13 +665,21 @@ newSiteBtn?.addEventListener("click", () => {
 });
 
 deleteSiteBtn?.addEventListener("click", () => {
-  if (!state.selectedSiteId) return;
-  state.sites = state.sites.filter((s) => s.id !== state.selectedSiteId);
-  saveSites();
-  state.selectedSiteId = null;
-  state.isNewSite = false;
-  renderSites();
-  updateSiteDetailsForm();
+  if (!state.selectedSiteId) {
+    showToast("info", "No Selection", "Please select a site to delete");
+    return;
+  }
+  
+  const site = state.sites.find((s) => s.id === state.selectedSiteId);
+  if (confirm(`Delete "${site?.name}"? This action cannot be undone.`)) {
+    state.sites = state.sites.filter((s) => s.id !== state.selectedSiteId);
+    saveSites();
+    state.selectedSiteId = null;
+    state.isNewSite = false;
+    renderSites();
+    updateSiteDetailsForm();
+    showToast("success", "Site Deleted", `"${site?.name}" has been removed`);
+  }
 });
 
 saveSiteBtn?.addEventListener("click", () => {
@@ -481,10 +689,12 @@ saveSiteBtn?.addEventListener("click", () => {
   const username = document.getElementById("site-user").value.trim();
   const password = document.getElementById("site-pass").value.trim();
 
-  if (!name || !host || !username) return;
+  if (!name || !host || !username) {
+    showToast("error", "Missing Fields", "Label, host, and username are required");
+    return;
+  }
 
   if (state.isNewSite) {
-    // Create new site
     const newId = uid();
     state.sites.push({
       id: newId,
@@ -496,8 +706,8 @@ saveSiteBtn?.addEventListener("click", () => {
     });
     state.selectedSiteId = newId;
     state.isNewSite = false;
+    showToast("success", "Site Created", `"${name}" has been saved`);
   } else if (state.selectedSiteId) {
-    // Update existing site
     const site = state.sites.find((s) => s.id === state.selectedSiteId);
     if (site) {
       site.name = name;
@@ -505,6 +715,7 @@ saveSiteBtn?.addEventListener("click", () => {
       site.port = port || "22";
       site.username = username;
       site.password = password;
+      showToast("success", "Site Updated", `"${name}" has been saved`);
     }
   }
 
@@ -513,22 +724,28 @@ saveSiteBtn?.addEventListener("click", () => {
 });
 
 connectSiteBtn?.addEventListener("click", () => {
-  // If we have unsaved changes for a new site, save first
   if (state.isNewSite) {
     const name = document.getElementById("site-name").value.trim();
     const host = document.getElementById("site-host").value.trim();
     const username = document.getElementById("site-user").value.trim();
-    
+
     if (name && host && username) {
       saveSiteBtn.click();
     }
   }
-  
-  connectSelectedSite();
+
+  if (state.selectedSiteId) {
+    connectSelectedSite();
+  } else {
+    showToast("info", "No Selection", "Please select or create a site first");
+  }
 });
 
 newTabBtn.addEventListener("click", () => createTab());
 
+// ========================================
+// Settings Modal
+// ========================================
 const showSettings = () => {
   if (!settingsModal) return;
   settingsModal.classList.remove("hidden");
@@ -552,7 +769,7 @@ window.__closeSettings = hideSettings;
 openSettingsBtn?.addEventListener("click", showSettings);
 closeSettingsBtn?.addEventListener("click", hideSettings);
 
-// Close modals when clicking outside
+// Close modals when clicking backdrop
 siteManagerModal?.addEventListener("click", (e) => {
   if (e.target === siteManagerModal) {
     hideSiteManager();
@@ -565,6 +782,7 @@ settingsModal?.addEventListener("click", (e) => {
   }
 });
 
+// Execution mode toggle
 modeButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     modeButtons.forEach((b) => b.classList.remove("active"));
@@ -580,9 +798,54 @@ saveSettingsBtn.addEventListener("click", () => {
   state.settings.theme = themeSelect.value || "light";
   saveSettings();
   applyTheme();
-  settingsModal.classList.add("hidden");
+  hideSettings();
+  showToast("success", "Settings Saved", "Your preferences have been updated");
+  
+  // Re-render active tab to update terminal theme
+  renderActiveTab();
 });
 
+// ========================================
+// Keyboard Shortcuts
+// ========================================
+document.addEventListener("keydown", (e) => {
+  // Escape to close modals
+  if (e.key === "Escape") {
+    if (!settingsModal.classList.contains("hidden")) {
+      hideSettings();
+    } else if (!siteManagerModal.classList.contains("hidden")) {
+      hideSiteManager();
+    }
+  }
+  
+  // Ctrl/Cmd + , for settings
+  if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+    e.preventDefault();
+    showSettings();
+  }
+  
+  // Ctrl/Cmd + K for site manager
+  if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+    e.preventDefault();
+    showSiteManager();
+  }
+  
+  // Ctrl/Cmd + T for new tab
+  if ((e.ctrlKey || e.metaKey) && e.key === "t") {
+    e.preventDefault();
+    createTab();
+  }
+  
+  // Ctrl/Cmd + W to close current tab
+  if ((e.ctrlKey || e.metaKey) && e.key === "w" && state.activeTabId) {
+    e.preventDefault();
+    closeTab(state.activeTabId);
+  }
+});
+
+// ========================================
+// Initialization
+// ========================================
 const init = () => {
   loadSites();
   loadSettings();
