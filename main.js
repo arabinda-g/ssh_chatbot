@@ -246,7 +246,7 @@ const callOpenAI = async ({ apiKey, model, messages, maxRetries }) => {
 
 ipcMain.handle(
   "ai-get-command",
-  async (_event, { prompt, logs, settings }) => {
+  async (_event, { prompt, logs, chatHistory, settings }) => {
     if (!settings?.apiKey) {
       return { ok: false, error: "Missing OpenAI API key" };
     }
@@ -255,13 +255,22 @@ ipcMain.handle(
       {
         role: "system",
         content:
-          "You are an SSH assistant. Respond with only a single command, no explanations."
-      },
-      {
-        role: "user",
-        content: `User request: ${prompt}\n\nRecent logs:\n${logs || "None"}`
+          "You are an SSH assistant that helps users run commands on their server. Respond with ONLY a single shell command, no explanations or markdown formatting. IMPORTANT: When the user sends a short follow-up message, it is almost always related to their previous question. For example, if they asked about disk space and then say 'in root' or 'for home', they want disk space information for that specific mount point or directory, NOT to change directories. Always interpret short follow-up messages in the context of the previous conversation topic."
       }
     ];
+
+    // Add chat history for context
+    if (chatHistory && chatHistory.length > 0) {
+      messages.push({
+        role: "user",
+        content: `CONVERSATION HISTORY (use this to understand context):\n${chatHistory.join("\n")}\n\n---\nRecent terminal output:\n${logs || "None"}\n\n---\nUser's current message: "${prompt}"\n\nRemember: If this is a short message, it's likely a follow-up to the previous topic. Generate a command that addresses the SAME TOPIC but with the new specificity the user mentioned.`
+      });
+    } else {
+      messages.push({
+        role: "user",
+        content: `User request: ${prompt}\n\nRecent logs:\n${logs || "None"}`
+      });
+    }
 
     const result = await callOpenAI({
       apiKey: settings.apiKey,
@@ -314,20 +323,25 @@ ipcMain.handle(
 
 ipcMain.handle(
   "ai-interpret-output",
-  async (_event, { prompt, command, output, settings }) => {
+  async (_event, { prompt, command, output, chatHistory, settings }) => {
     if (!settings?.apiKey) {
       return { ok: false, error: "Missing OpenAI API key" };
+    }
+
+    let contextInfo = "";
+    if (chatHistory && chatHistory.length > 0) {
+      contextInfo = `Previous conversation:\n${chatHistory.join("\n")}\n\n`;
     }
 
     const messages = [
       {
         role: "system",
         content:
-          "You are a helpful SSH assistant. The user asked a question, a command was run, and you now have the output. Provide a clear, concise, human-friendly answer to the user's original question based on the command output. Be brief but informative. Do not include the command or raw output in your response unless necessary for clarity. You may use **bold** for emphasis on important values."
+          "You are a helpful SSH assistant. The user asked a question (which may be a follow-up to a previous conversation), a command was run, and you now have the output. Provide a clear, concise, human-friendly answer to the user's original question based on the command output and conversation context. Be brief but informative. Do not include the command or raw output in your response unless necessary for clarity. You may use **bold** for emphasis on important values."
       },
       {
         role: "user",
-        content: `User's question: ${prompt}\n\nCommand executed: ${command}\n\nCommand output:\n${output}`
+        content: `${contextInfo}Current question: ${prompt}\n\nCommand executed: ${command}\n\nCommand output:\n${output}`
       }
     ];
 

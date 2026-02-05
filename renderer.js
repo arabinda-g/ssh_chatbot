@@ -585,6 +585,28 @@ const shouldRunCommand = (tab, command) => {
   });
 };
 
+// Build chat history for context
+const buildChatHistory = (tab) => {
+  const history = [];
+  for (const msg of tab.chat) {
+    if (msg.isThinking) continue;
+    if (msg.role === "user") {
+      history.push(`[USER QUESTION]: ${msg.text}`);
+    } else if (msg.role === "answer") {
+      history.push(`[AI ANSWER]: ${msg.text}`);
+    } else if (msg.role === "assistant" && msg.text) {
+      // Include commands that were run
+      if (msg.text.startsWith("Command:")) {
+        history.push(`[COMMAND RAN]: ${msg.text.replace("Command: ", "").replace(/`/g, "")}`);
+      } else if (msg.text.startsWith("✓")) {
+        history.push(`[RESULT]: Command succeeded`);
+      }
+    }
+  }
+  // Keep last 15 items for better context
+  return history.slice(-15);
+};
+
 const handleChatSend = async (tab) => {
   const input = document.getElementById(`chat-input-${tab.id}`);
   const prompt = input.value.trim();
@@ -596,12 +618,17 @@ const handleChatSend = async (tab) => {
   }
   
   input.value = "";
+  
+  // Build chat history before adding the new message
+  const chatHistory = buildChatHistory(tab);
+  
   addChatMessage(tab, "user", prompt);
   addChatMessage(tab, "assistant", "", true); // Thinking indicator
 
   const response = await sshApi.aiGetCommand({
     prompt,
     logs: tab.logs.slice(-4000),
+    chatHistory,
     settings: state.settings
   });
 
@@ -619,10 +646,10 @@ const handleChatSend = async (tab) => {
     return;
   }
 
-  await runCommandWithRetries(tab, prompt, command);
+  await runCommandWithRetries(tab, prompt, command, chatHistory);
 };
 
-const runCommandWithRetries = async (tab, prompt, command) => {
+const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => {
   let retries = 0;
   let current = command;
 
@@ -660,6 +687,7 @@ const runCommandWithRetries = async (tab, prompt, command) => {
         prompt,
         command: current,
         output: result.stdout || "",
+        chatHistory,
         settings: state.settings
       });
       
