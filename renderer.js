@@ -80,8 +80,11 @@ const escapeHtml = (text) => {
 
 // Enhanced markdown parser for answer messages
 const parseSimpleMarkdown = (text) => {
-  // First escape HTML
   let result = escapeHtml(text);
+  // Convert ```code blocks``` to <pre><code>
+  result = result.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    return `<pre class="code-block"><code>${code.trim()}</code></pre>`;
+  });
   // Convert **bold** to <strong>bold</strong>
   result = result.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   // Convert *italic* to <em>italic</em>
@@ -94,11 +97,35 @@ const parseSimpleMarkdown = (text) => {
   result = result.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
   // Convert numbered lists (1. item)
   result = result.replace(/^\d+\.\s+(.+)$/gm, "<li>$1</li>");
-  // Convert newlines to <br> (but not inside lists)
+  // Convert newlines to <br> (but not inside lists or pre)
   result = result.replace(/\n(?!<)/g, "<br>");
-  // Clean up extra <br> after </ul>
+  // Clean up extra <br> after </ul> or </pre>
   result = result.replace(/<\/ul><br>/g, "</ul>");
+  result = result.replace(/<\/pre><br>/g, "</pre>");
   return result;
+};
+
+// Copy text to clipboard with feedback
+const copyToClipboard = async (text, feedbackEl) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (feedbackEl) {
+      feedbackEl.classList.add("copied");
+      setTimeout(() => feedbackEl.classList.remove("copied"), 1500);
+    }
+  } catch {
+    // Fallback for older environments
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (feedbackEl) {
+      feedbackEl.classList.add("copied");
+      setTimeout(() => feedbackEl.classList.remove("copied"), 1500);
+    }
+  }
 };
 
 // ========================================
@@ -108,13 +135,14 @@ const showToast = (type, title, message, duration = 4000) => {
   const icons = {
     success: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
     error: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
-    info: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`
+    info: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
+    warning: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
   };
 
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
   toast.innerHTML = `
-    ${icons[type]}
+    ${icons[type] || icons.info}
     <div class="toast-content">
       <div class="toast-title">${escapeHtml(title)}</div>
       ${message ? `<div class="toast-message">${escapeHtml(message)}</div>` : ""}
@@ -167,7 +195,6 @@ const saveChatSessions = (siteId, sessions) => {
 };
 
 const createNewSession = (siteId, sessions) => {
-  // Find the next number for auto-naming
   const existingNums = sessions
     .map((s) => {
       const match = s.name.match(/^Chat (\d+)$/);
@@ -199,7 +226,6 @@ const saveCurrentSession = (tab) => {
   }
 };
 
-// Remember the last active session for each site
 const saveLastActiveSession = (siteId, sessionId) => {
   if (!siteId || !sessionId) return;
   const data = JSON.parse(localStorage.getItem("last_active_sessions") || "{}");
@@ -213,14 +239,12 @@ const getLastActiveSession = (siteId) => {
   return data[siteId] || null;
 };
 
-// Generate a title for a session based on the first user message
 const generateSessionTitle = async (tab, prompt) => {
   if (!tab.site?.id || !tab.activeSessionId) return;
 
   const session = tab.sessions?.find((s) => s.id === tab.activeSessionId);
   if (!session) return;
 
-  // Only generate title if session still has the default "Chat N" name
   if (!/^Chat \d+$/.test(session.name)) return;
 
   try {
@@ -235,20 +259,17 @@ const generateSessionTitle = async (tab, prompt) => {
       updateSessionBar(tab);
     }
   } catch {
-    // Silently fail — title generation is non-critical
+    // Silently fail
   }
 };
 
 const switchSession = (tab, sessionId) => {
-  // Save current session first
   saveCurrentSession(tab);
 
-  // Switch to new session
   tab.activeSessionId = sessionId;
   const session = tab.sessions.find((s) => s.id === sessionId);
   tab.chat = session ? [...session.messages] : [];
 
-  // Remember this as the last active session for the site
   if (tab.site?.id) {
     saveLastActiveSession(tab.site.id, sessionId);
   }
@@ -260,7 +281,6 @@ const switchSession = (tab, sessionId) => {
 const deleteSession = (tab, sessionId) => {
   if (!tab.site?.id || !tab.sessions) return;
 
-  // Don't delete the last session
   if (tab.sessions.length <= 1) {
     showToast("info", "Cannot Delete", "You need at least one chat session");
     return;
@@ -270,7 +290,6 @@ const deleteSession = (tab, sessionId) => {
   tab.sessions = tab.sessions.filter((s) => s.id !== sessionId);
   saveChatSessions(tab.site.id, tab.sessions);
 
-  // If we deleted the active session, switch to the most recent one
   if (tab.activeSessionId === sessionId) {
     const latest = tab.sessions.sort((a, b) => b.updatedAt - a.updatedAt)[0];
     tab.activeSessionId = latest.id;
@@ -424,10 +443,7 @@ const connectSelectedSite = () => {
 };
 
 // ========================================
-// Tab Management
-// ========================================
-// ========================================
-// Environment Detection
+// Tab Management & Environment Detection
 // ========================================
 const detectEnvironment = async (tab) => {
   if (!tab.site) return;
@@ -453,11 +469,10 @@ const detectEnvironment = async (tab) => {
         if (trimmed.startsWith("USER:")) info.user = trimmed.slice(5).trim();
         if (trimmed.startsWith("INIT:")) info.initSystem = trimmed.slice(5).trim();
         if (trimmed.startsWith("ARCH:")) info.arch = trimmed.slice(5).trim();
-        // Package manager detection - take the last valid line from PKG block
         if (trimmed.startsWith("PKG:") || trimmed.match(/^\/.*\/(apt-get|yum|dnf|pacman|apk)$/)) {
           const pkgName = trimmed.replace(/^PKG:/, "").trim();
           if (pkgName && pkgName !== "unknown") {
-            info.packageManager = pkgName.split("/").pop(); // Extract binary name from path
+            info.packageManager = pkgName.split("/").pop();
           }
         }
         if (/^(apt-get|yum|dnf|pacman|apk)$/.test(trimmed)) {
@@ -465,17 +480,15 @@ const detectEnvironment = async (tab) => {
         }
       }
 
-      // Determine init system
       if (info.initSystem === "systemd" || info.initSystem === "init") {
         info.initSystem = info.initSystem;
       } else {
-        info.initSystem = "systemd"; // Default assumption for modern Linux
+        info.initSystem = "systemd";
       }
 
       tab.envInfo = info;
     }
   } catch (e) {
-    // Silently fail - environment detection is optional
     tab.envInfo = null;
   }
 };
@@ -483,27 +496,22 @@ const detectEnvironment = async (tab) => {
 const createTab = async (site) => {
   const tabId = uid();
 
-  // Load saved chat sessions for this site
   let sessions = site ? loadChatSessions(site.id) : [];
   let activeSessionId = null;
 
   if (site && sessions.length > 0) {
-    // Try to restore last active session for this site
     const lastActiveId = getLastActiveSession(site.id);
     if (lastActiveId && sessions.find((s) => s.id === lastActiveId)) {
       activeSessionId = lastActiveId;
     } else {
-      // Fall back to most recent
       sessions.sort((a, b) => b.updatedAt - a.updatedAt);
       activeSessionId = sessions[0].id;
     }
   } else if (site) {
-    // Create default first session
     const firstSession = createNewSession(site.id, sessions);
     activeSessionId = firstSession.id;
   }
 
-  // Save the active session as the last active for this site
   if (site && activeSessionId) {
     saveLastActiveSession(site.id, activeSessionId);
   }
@@ -521,8 +529,10 @@ const createTab = async (site) => {
     chat: activeSession ? [...activeSession.messages] : [],
     sessions,
     activeSessionId,
-    envInfo: null, // Populated after connection
-    commandHistory: [] // Track commands for retry context
+    envInfo: null,
+    commandHistory: [],
+    abortController: null, // For stopping retry loops
+    isExecuting: false // Track if currently executing
   };
 
   state.tabs.push(tab);
@@ -539,7 +549,11 @@ const closeTab = async (tabId) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
 
-  // Save chat session before closing
+  // Abort any running execution
+  if (tab.abortController) {
+    tab.abortController.abort();
+  }
+
   saveCurrentSession(tab);
 
   await sshApi.sshDisconnect({ tabId });
@@ -579,7 +593,7 @@ const renderTabs = () => {
         <span class="status-dot ${tab.status}"></span>
         ${escapeHtml(tab.statusText)}
       </span>
-      <button class="close-btn" data-action="close" title="Close tab">×</button>
+      <button class="close-btn" data-action="close" title="Close tab">&times;</button>
     `;
     
     tabBtn.addEventListener("click", (e) => {
@@ -679,13 +693,20 @@ const renderActiveTab = () => {
       </div>
       <div class="chat-messages" id="chat-${tab.id}"></div>
       <div class="chat-input">
-        <input id="chat-input-${tab.id}" placeholder="Ask AI to run a command..." />
-        <button class="primary" id="chat-send-${tab.id}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"/>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-          Send
+        <input id="chat-input-${tab.id}" placeholder="Ask AI to run a command..." ${tab.isExecuting ? "disabled" : ""} />
+        <button class="${tab.isExecuting ? "stop-btn" : "primary"}" id="chat-send-${tab.id}">
+          ${tab.isExecuting ? `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="6" width="12" height="12" rx="2"/>
+            </svg>
+            Stop
+          ` : `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+            Send
+          `}
         </button>
       </div>
     </div>
@@ -711,14 +732,12 @@ const renderActiveTab = () => {
       }
     });
     
-    // Create and load FitAddon
     const fitAddon = new FitAddon.FitAddon();
     tab.terminal.loadAddon(fitAddon);
     tab.fitAddon = fitAddon;
     
     tab.terminal.open(terminalContainer);
     
-    // Fit terminal to container
     setTimeout(() => {
       fitAddon.fit();
     }, 50);
@@ -728,7 +747,6 @@ const renderActiveTab = () => {
     });
   } else {
     tab.terminal.open(terminalContainer);
-    // Re-fit terminal after re-opening
     if (tab.fitAddon) {
       setTimeout(() => {
         tab.fitAddon.fit();
@@ -743,15 +761,24 @@ const renderActiveTab = () => {
   const chatInput = document.getElementById(`chat-input-${tab.id}`);
   const askToggle = document.getElementById(`ask-toggle-${tab.id}`);
   
-  sendBtn.addEventListener("click", () => handleChatSend(tab));
-  chatInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
+  sendBtn.addEventListener("click", () => {
+    if (tab.isExecuting) {
+      // Stop button clicked
+      stopExecution(tab);
+    } else {
       handleChatSend(tab);
     }
   });
 
-  // Ask toggle event listener
+  chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!tab.isExecuting) {
+        handleChatSend(tab);
+      }
+    }
+  });
+
   askToggle?.addEventListener("change", (e) => {
     state.settings.mode = e.target.checked ? "ask" : "auto";
     saveSettings();
@@ -770,15 +797,10 @@ const renderActiveTab = () => {
     e.stopPropagation();
     if (!tab.site?.id) return;
 
-    // Save current session
     saveCurrentSession(tab);
-
-    // Create new session
     const newSession = createNewSession(tab.site.id, tab.sessions);
     tab.activeSessionId = newSession.id;
     tab.chat = [];
-
-    // Remember as last active
     saveLastActiveSession(tab.site.id, newSession.id);
 
     renderChat(tab);
@@ -786,6 +808,47 @@ const renderActiveTab = () => {
     closeSessionDropdown();
     showToast("success", "New Chat", `"${newSession.name}" created`);
   });
+};
+
+// ========================================
+// Stop Execution
+// ========================================
+const stopExecution = (tab) => {
+  if (tab.abortController) {
+    tab.abortController.abort();
+    tab.abortController = null;
+  }
+  tab.isExecuting = false;
+  addChatMessage(tab, "assistant", "Execution stopped by user.");
+  showToast("info", "Stopped", "Command execution was stopped");
+  updateSendButton(tab);
+};
+
+const updateSendButton = (tab) => {
+  const sendBtn = document.getElementById(`chat-send-${tab.id}`);
+  const chatInput = document.getElementById(`chat-input-${tab.id}`);
+  if (!sendBtn) return;
+
+  if (tab.isExecuting) {
+    sendBtn.className = "stop-btn";
+    sendBtn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6" y="6" width="12" height="12" rx="2"/>
+      </svg>
+      Stop
+    `;
+    if (chatInput) chatInput.disabled = true;
+  } else {
+    sendBtn.className = "primary";
+    sendBtn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+      Send
+    `;
+    if (chatInput) chatInput.disabled = false;
+  }
 };
 
 // ========================================
@@ -799,13 +862,11 @@ const closeSessionDropdown = () => {
   activeDropdownTabId = null;
 };
 
-// Close dropdown when clicking elsewhere
 document.addEventListener("click", () => {
   closeSessionDropdown();
 });
 
 const toggleSessionDropdown = (tab) => {
-  // If already open for this tab, close it
   if (activeDropdownTabId === tab.id) {
     closeSessionDropdown();
     return;
@@ -821,7 +882,6 @@ const toggleSessionDropdown = (tab) => {
   dropdown.className = "session-dropdown";
   dropdown.addEventListener("click", (e) => e.stopPropagation());
 
-  // Sort sessions: active first, then by most recent
   const sortedSessions = [...(tab.sessions || [])].sort((a, b) => {
     if (a.id === tab.activeSessionId) return -1;
     if (b.id === tab.activeSessionId) return 1;
@@ -836,10 +896,8 @@ const toggleSessionDropdown = (tab) => {
 
   for (const session of sortedSessions) {
     const isActive = session.id === tab.activeSessionId;
-    const msgCount = session.messages?.length || 0;
     const userMsgCount = session.messages?.filter((m) => m.role === "user").length || 0;
     const timeAgo = formatSessionDate(session.updatedAt);
-    // Get first user message as preview
     const firstUserMsg = session.messages?.find((m) => m.role === "user");
     const preview = firstUserMsg
       ? firstUserMsg.text.slice(0, 50) + (firstUserMsg.text.length > 50 ? "..." : "")
@@ -877,11 +935,9 @@ const toggleSessionDropdown = (tab) => {
   html += `</div>`;
   dropdown.innerHTML = html;
 
-  // Position dropdown below the session bar
   sessionBar.style.position = "relative";
   sessionBar.appendChild(dropdown);
 
-  // Attach event listeners
   dropdown.querySelectorAll('[data-action="switch"]').forEach((el) => {
     el.addEventListener("click", () => {
       const sessionId = el.dataset.sessionId;
@@ -899,7 +955,6 @@ const toggleSessionDropdown = (tab) => {
       const session = tab.sessions.find((s) => s.id === sessionId);
       if (!session) return;
 
-      // Replace the session name span with an input
       const nameSpan = dropdown.querySelector(`.session-item-name[data-session-id="${sessionId}"]`);
       if (!nameSpan) return;
 
@@ -969,10 +1024,9 @@ const renderChat = (tab) => {
         <div class="typing-indicator">
           <span></span><span></span><span></span>
         </div>
-        <span>Thinking...</span>
+        <span>${msg.text || "Thinking..."}</span>
       `;
     } else if (msg.role === "answer") {
-      // Answer messages with an icon
       bubble.innerHTML = `
         <div class="answer-header">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -981,9 +1035,134 @@ const renderChat = (tab) => {
             <path d="M12 8h.01"/>
           </svg>
           <span>Answer</span>
+          <button class="copy-btn" title="Copy answer">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
         </div>
         <div class="answer-content">${parseSimpleMarkdown(msg.text)}</div>
       `;
+      // Copy button handler
+      const copyBtn = bubble.querySelector(".copy-btn");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", () => copyToClipboard(msg.text, copyBtn));
+      }
+    } else if (msg.role === "impossible") {
+      // Impossible/blocked message type
+      bubble.innerHTML = `
+        <div class="impossible-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+          </svg>
+          <span>Cannot Proceed</span>
+        </div>
+        <div class="impossible-content">${parseSimpleMarkdown(msg.text)}</div>
+        ${msg.suggestion ? `<div class="impossible-suggestion"><strong>Alternative:</strong> ${escapeHtml(msg.suggestion)}</div>` : ""}
+      `;
+    } else if (msg.role === "info") {
+      // Informational response (no command needed)
+      bubble.innerHTML = `
+        <div class="info-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span>Info</span>
+          <button class="copy-btn" title="Copy">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+        </div>
+        <div class="info-content">${parseSimpleMarkdown(msg.text)}</div>
+      `;
+      const copyBtn = bubble.querySelector(".copy-btn");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", () => copyToClipboard(msg.text, copyBtn));
+      }
+    } else if (msg.role === "clarification") {
+      // Clarification request from AI
+      bubble.innerHTML = `
+        <div class="clarification-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+            <path d="M12 17h.01"/>
+          </svg>
+          <span>Clarification Needed</span>
+        </div>
+        <div class="clarification-content">${parseSimpleMarkdown(msg.text)}</div>
+        ${msg.options && msg.options.length > 0 ? `
+          <div class="clarification-options">
+            ${msg.options.map((opt) => `<button class="clarification-option" data-option="${escapeHtml(opt)}">${escapeHtml(opt)}</button>`).join("")}
+          </div>
+        ` : ""}
+      `;
+      // Option click handlers
+      bubble.querySelectorAll(".clarification-option").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const optionText = btn.dataset.option;
+          const input = document.getElementById(`chat-input-${tab.id}`);
+          if (input) {
+            input.value = optionText;
+            handleChatSend(tab);
+          }
+        });
+      });
+    } else if (msg.role === "plan") {
+      // Multi-step plan display
+      bubble.innerHTML = `
+        <div class="plan-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <span>${escapeHtml(msg.title || "Execution Plan")}</span>
+        </div>
+        <div class="plan-content">
+          ${msg.explanation ? `<p class="plan-explanation">${escapeHtml(msg.explanation)}</p>` : ""}
+          <div class="plan-steps">
+            ${(msg.steps || []).map((step, i) => `
+              <div class="plan-step ${step.status || ""}" data-step-index="${i}">
+                <div class="plan-step-number">${i + 1}</div>
+                <div class="plan-step-info">
+                  <div class="plan-step-desc">${escapeHtml(step.description)}</div>
+                  <div class="plan-step-cmd"><code>${escapeHtml(step.command)}</code></div>
+                </div>
+                <div class="plan-step-status">
+                  ${step.status === "done" ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' : ""}
+                  ${step.status === "running" ? '<div class="spinner"></div>' : ""}
+                  ${step.status === "failed" ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' : ""}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    } else if (msg.role === "assistant") {
+      // Regular assistant messages - check for command messages to add copy button
+      const commandMatch = msg.text.match(/^Command: `(.+)`$/);
+      if (commandMatch) {
+        bubble.innerHTML = `
+          <span>Command: <code>${escapeHtml(commandMatch[1])}</code></span>
+          <button class="copy-btn inline" title="Copy command">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+        `;
+        const copyBtn = bubble.querySelector(".copy-btn");
+        if (copyBtn) {
+          copyBtn.addEventListener("click", () => copyToClipboard(commandMatch[1], copyBtn));
+        }
+      } else {
+        bubble.textContent = msg.text;
+      }
     } else {
       bubble.textContent = msg.text;
     }
@@ -994,11 +1173,11 @@ const renderChat = (tab) => {
   chatEl.scrollTop = chatEl.scrollHeight;
 };
 
-const addChatMessage = (tab, role, text, isThinking = false) => {
-  tab.chat.push({ role, text, isThinking });
+const addChatMessage = (tab, role, text, extra = {}) => {
+  const msg = { role, text, ...extra };
+  tab.chat.push(msg);
   renderChat(tab);
-  // Auto-save non-thinking messages to persistent session
-  if (!isThinking) {
+  if (!extra.isThinking) {
     saveCurrentSession(tab);
   }
 };
@@ -1008,22 +1187,29 @@ const removeThinkingMessage = (tab) => {
   renderChat(tab);
 };
 
-const shouldRunCommand = (tab, command) => {
-  if (state.settings.mode === "auto") return Promise.resolve(true);
+const shouldRunCommand = (tab, command, risk) => {
+  // Always ask for high risk commands regardless of mode
+  if (state.settings.mode === "auto" && risk !== "high") return Promise.resolve(true);
   
   return new Promise((resolve) => {
     const chatEl = document.getElementById(`chat-${tab.id}`);
     if (!chatEl) return resolve(false);
 
-    // Create inline confirmation UI
     const confirmEl = document.createElement("div");
-    confirmEl.className = "chat-confirm";
+    confirmEl.className = `chat-confirm ${risk === "high" ? "high-risk" : ""}`;
     confirmEl.innerHTML = `
       <div class="confirm-header">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" />
-        </svg>
-        Execute this command?
+        ${risk === "high" ? `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          High Risk Command — Review Carefully
+        ` : `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" />
+          </svg>
+          Execute this command?
+        `}
       </div>
       <div class="confirm-command"><code>${escapeHtml(command)}</code></div>
       <div class="confirm-actions">
@@ -1056,7 +1242,7 @@ const shouldRunCommand = (tab, command) => {
   });
 };
 
-// Build chat history for context - richer and more structured
+// Build chat history for context
 const buildChatHistory = (tab) => {
   const history = [];
   for (const msg of tab.chat) {
@@ -1064,23 +1250,35 @@ const buildChatHistory = (tab) => {
     if (msg.role === "user") {
       history.push(`[USER]: ${msg.text}`);
     } else if (msg.role === "answer") {
-      history.push(`[AI INTERPRETATION]: ${msg.text}`);
+      history.push(`[AI ANALYSIS]: ${msg.text}`);
+    } else if (msg.role === "impossible") {
+      history.push(`[BLOCKED]: ${msg.text}`);
+    } else if (msg.role === "info") {
+      history.push(`[INFO]: ${msg.text}`);
+    } else if (msg.role === "clarification") {
+      history.push(`[CLARIFICATION ASKED]: ${msg.text}`);
+    } else if (msg.role === "plan") {
+      history.push(`[PLAN]: ${msg.title} - ${(msg.steps || []).map((s) => s.description).join(", ")}`);
     } else if (msg.role === "assistant" && msg.text) {
       if (msg.text.startsWith("Command:")) {
         history.push(`[COMMAND EXECUTED]: ${msg.text.replace("Command: ", "").replace(/`/g, "")}`);
-      } else if (msg.text.startsWith("✓")) {
+      } else if (msg.text.includes("completed successfully")) {
         history.push(`[RESULT]: Success`);
       } else if (msg.text.includes("failed") || msg.text.includes("error") || msg.text.includes("Error")) {
         history.push(`[RESULT]: ${msg.text}`);
-      } else if (msg.text.startsWith("Execution cancelled")) {
-        history.push(`[CANCELLED]: User cancelled execution`);
+      } else if (msg.text.includes("stopped by user") || msg.text.includes("cancelled")) {
+        history.push(`[STOPPED]: User stopped execution`);
+      } else if (msg.text.includes("Aborted")) {
+        history.push(`[ABORTED]: ${msg.text}`);
       }
     }
   }
-  // Keep last 20 items for comprehensive context
   return history.slice(-20);
 };
 
+// ========================================
+// Main Chat Send Handler (Super Intelligent)
+// ========================================
 const handleChatSend = async (tab) => {
   const input = document.getElementById(`chat-input-${tab.id}`);
   const prompt = input.value.trim();
@@ -1095,91 +1293,254 @@ const handleChatSend = async (tab) => {
     addChatMessage(tab, "assistant", "Not connected to server. Please reconnect first.");
     return;
   }
+
+  if (tab.isExecuting) return;
   
   input.value = "";
 
-  // Check if this is the first user message (for title generation)
   const isFirstMessage = !tab.chat.some((m) => m.role === "user" && !m.isThinking);
-
-  // Build chat history before adding the new message
   const chatHistory = buildChatHistory(tab);
   
   addChatMessage(tab, "user", prompt);
-  addChatMessage(tab, "assistant", "", true); // Thinking indicator
+  addChatMessage(tab, "assistant", "Analyzing request...", { isThinking: true });
 
-  // Generate session title on first message (fire and forget)
   if (isFirstMessage) {
     generateSessionTitle(tab, prompt);
   }
 
-  const response = await sshApi.aiGetCommand({
-    prompt,
-    logs: tab.logs.slice(-8000), // More context for the AI
-    chatHistory,
-    envInfo: tab.envInfo || null,
-    settings: state.settings
-  });
+  // Set up abort controller for this execution
+  tab.abortController = new AbortController();
+  tab.isExecuting = true;
+  updateSendButton(tab);
 
-  removeThinkingMessage(tab);
-  
-  if (!response.ok) {
-    addChatMessage(tab, "assistant", response.error || "AI request failed.");
-    showToast("error", "AI Error", response.error || "Failed to get command");
-    return;
+  try {
+    const response = await sshApi.aiGetCommand({
+      prompt,
+      logs: tab.logs.slice(-8000),
+      chatHistory,
+      envInfo: tab.envInfo || null,
+      settings: state.settings
+    });
+
+    // Check if aborted
+    if (tab.abortController?.signal?.aborted) {
+      removeThinkingMessage(tab);
+      return;
+    }
+
+    removeThinkingMessage(tab);
+    
+    if (!response.ok) {
+      addChatMessage(tab, "assistant", response.error || "AI request failed.");
+      showToast("error", "AI Error", response.error || "Failed to get response");
+      return;
+    }
+
+    // Handle different response types
+    const responseType = response.responseType || "command";
+
+    switch (responseType) {
+      case "impossible":
+        addChatMessage(tab, "impossible", response.reason, { suggestion: response.suggestion });
+        showToast("warning", "Cannot Proceed", "This task isn't feasible on this system");
+        break;
+
+      case "info":
+        addChatMessage(tab, "info", response.answer);
+        break;
+
+      case "clarification":
+        addChatMessage(tab, "clarification", response.question, { options: response.options || [] });
+        break;
+
+      case "plan":
+        await executePlan(tab, prompt, response, chatHistory);
+        break;
+
+      case "command":
+      default:
+        if (!response.command) {
+          addChatMessage(tab, "assistant", "No command was returned by the AI.");
+          break;
+        }
+
+        // Show explanation if available
+        if (response.explanation) {
+          addChatMessage(tab, "assistant", response.explanation);
+        }
+
+        await runCommandWithRetries(tab, prompt, response.command, chatHistory, response.risk || "low");
+        break;
+    }
+  } finally {
+    tab.isExecuting = false;
+    tab.abortController = null;
+    updateSendButton(tab);
   }
-
-  let command = response.command;
-  if (!command) {
-    addChatMessage(tab, "assistant", "No command was returned by the AI.");
-    return;
-  }
-
-  await runCommandWithRetries(tab, prompt, command, chatHistory);
 };
 
-const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => {
+// ========================================
+// Execute Multi-Step Plan
+// ========================================
+const executePlan = async (tab, prompt, plan, chatHistory) => {
+  const steps = plan.steps || [];
+  if (steps.length === 0) {
+    addChatMessage(tab, "assistant", "The plan has no steps to execute.");
+    return;
+  }
+
+  // Add plan message with step statuses
+  const stepsWithStatus = steps.map((s) => ({ ...s, status: "pending" }));
+  const planMsg = {
+    role: "plan",
+    text: plan.explanation || "",
+    title: plan.title || "Execution Plan",
+    steps: stepsWithStatus,
+    explanation: plan.explanation || ""
+  };
+  tab.chat.push(planMsg);
+  renderChat(tab);
+  saveCurrentSession(tab);
+
+  // Execute each step
+  for (let i = 0; i < stepsWithStatus.length; i++) {
+    // Check if aborted
+    if (tab.abortController?.signal?.aborted) {
+      stepsWithStatus[i].status = "failed";
+      renderChat(tab);
+      return;
+    }
+
+    stepsWithStatus[i].status = "running";
+    renderChat(tab);
+
+    const step = stepsWithStatus[i];
+
+    // Ask for confirmation if in ask mode
+    const shouldRun = await shouldRunCommand(tab, step.command, "low");
+    if (!shouldRun) {
+      stepsWithStatus[i].status = "failed";
+      addChatMessage(tab, "assistant", `Step ${i + 1} cancelled by user. Stopping plan execution.`);
+      renderChat(tab);
+      return;
+    }
+
+    // Execute the step
+    const result = await sshApi.sshExec({
+      tabId: tab.id,
+      command: step.command,
+      password: tab.site?.password || ""
+    });
+
+    if (tab.abortController?.signal?.aborted) {
+      stepsWithStatus[i].status = "failed";
+      renderChat(tab);
+      return;
+    }
+
+    const logs = [result.stdout || "", result.stderr || "", result.error || ""].filter(Boolean).join("\n");
+    tab.logs += `\n$ ${step.command}\n${logs}\n`;
+
+    if (result.timedOut) {
+      stepsWithStatus[i].status = "failed";
+      addChatMessage(tab, "assistant", `Step ${i + 1} timed out. Stopping plan.`);
+      renderChat(tab);
+      return;
+    }
+
+    // Interpret the result
+    const interpretation = await sshApi.aiInterpretOutput({
+      prompt: `Step ${i + 1} of plan "${plan.title}": ${step.description}`,
+      command: step.command,
+      output: result.cleanStdout || result.stdout || "",
+      chatHistory,
+      envInfo: tab.envInfo || null,
+      settings: state.settings
+    });
+
+    const heuristicOk = result.ok;
+    const aiSaysOk = interpretation.ok ? interpretation.commandSucceeded : true;
+    const isSuccess = aiSaysOk !== false && (heuristicOk || aiSaysOk === true);
+
+    if (isSuccess) {
+      stepsWithStatus[i].status = "done";
+      renderChat(tab);
+
+      if (interpretation.ok && interpretation.answer) {
+        addChatMessage(tab, "answer", `**Step ${i + 1}:** ${interpretation.answer}`);
+      }
+    } else {
+      stepsWithStatus[i].status = "failed";
+      renderChat(tab);
+
+      // Check for permanent failure
+      if (interpretation.permanentFailure) {
+        addChatMessage(tab, "impossible", interpretation.answer || "This step failed permanently.", {
+          suggestion: interpretation.failureCategory === "os_incompatible"
+            ? "This software requires a different operating system."
+            : null
+        });
+        return;
+      }
+
+      if (interpretation.ok && interpretation.answer) {
+        addChatMessage(tab, "answer", `**Step ${i + 1} failed:** ${interpretation.answer}`);
+      }
+
+      addChatMessage(tab, "assistant", `Plan execution stopped at step ${i + 1}. You can try to fix this step manually and continue.`);
+      return;
+    }
+  }
+
+  // All steps completed
+  addChatMessage(tab, "assistant", "All plan steps completed successfully!");
+  showToast("success", "Plan Complete", `All ${stepsWithStatus.length} steps finished`);
+};
+
+// ========================================
+// Command Execution with Smart Retries
+// ========================================
+const runCommandWithRetries = async (tab, prompt, command, chatHistory = [], risk = "low") => {
   let retries = 0;
   let current = command;
-  const failedCommands = []; // Track what we've already tried
+  const failedCommands = [];
 
   while (retries < state.settings.maxRetries) {
+    // Check if aborted
+    if (tab.abortController?.signal?.aborted) return;
+
     addChatMessage(tab, "assistant", `Command: \`${current}\``);
 
-    const shouldRun = await shouldRunCommand(tab, current);
+    const shouldRun = await shouldRunCommand(tab, current, risk);
     if (!shouldRun) {
       addChatMessage(tab, "assistant", "Execution cancelled by user.");
       return;
     }
 
-    // Track command in history
+    if (tab.abortController?.signal?.aborted) return;
+
     if (!tab.commandHistory) tab.commandHistory = [];
     tab.commandHistory.push(current);
 
     const result = await sshApi.sshExec({
       tabId: tab.id,
       command: current,
-      password: tab.site?.password || "" // Pass password for sudo handling
+      password: tab.site?.password || ""
     });
 
-    const logs = [
-      result.stdout || "",
-      result.stderr || "",
-      result.error || ""
-    ]
-      .filter(Boolean)
-      .join("\n");
+    if (tab.abortController?.signal?.aborted) return;
 
+    const logs = [result.stdout || "", result.stderr || "", result.error || ""].filter(Boolean).join("\n");
     tab.logs += `\n$ ${current}\n${logs}\n`;
 
-    // Handle timeout specially
     if (result.timedOut) {
       addChatMessage(tab, "assistant", "Command timed out. It may still be running in the background.");
       showToast("error", "Timeout", "The command took too long to complete");
       return;
     }
 
-    // Use AI to interpret output AND determine success
-    addChatMessage(tab, "assistant", "", true); // Thinking indicator
+    // Interpret output
+    addChatMessage(tab, "assistant", "Analyzing output...", { isThinking: true });
 
     const interpretation = await sshApi.aiInterpretOutput({
       prompt,
@@ -1190,16 +1551,32 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => 
       settings: state.settings
     });
 
+    if (tab.abortController?.signal?.aborted) {
+      removeThinkingMessage(tab);
+      return;
+    }
+
     removeThinkingMessage(tab);
 
-    // Determine success: combine heuristic detection with AI interpretation
+    // Check for permanent failure FIRST — stop immediately
+    if (interpretation.ok && interpretation.permanentFailure) {
+      addChatMessage(tab, "impossible", interpretation.answer || "This task cannot be completed on this system.", {
+        suggestion: interpretation.failureCategory === "os_incompatible"
+          ? "This software requires a different operating system/distribution."
+          : interpretation.failureCategory === "arch_incompatible"
+          ? "This software doesn't support this CPU architecture."
+          : null
+      });
+      showToast("warning", "Permanent Failure", "This task cannot succeed on this system");
+      return;
+    }
+
     const heuristicOk = result.ok;
     const aiSaysOk = interpretation.ok ? interpretation.commandSucceeded : true;
-    // Trust AI interpretation primarily, but also consider heuristic
     const isSuccess = aiSaysOk !== false && (heuristicOk || aiSaysOk === true);
 
     if (isSuccess) {
-      addChatMessage(tab, "assistant", "✓ Command completed successfully.");
+      addChatMessage(tab, "assistant", "Command completed successfully.");
       
       if (interpretation.ok && interpretation.answer) {
         addChatMessage(tab, "answer", interpretation.answer);
@@ -1209,7 +1586,7 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => 
       return;
     }
 
-    // Command failed
+    // Command failed — try to fix
     failedCommands.push(current);
     retries += 1;
 
@@ -1224,7 +1601,7 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => 
     }
 
     addChatMessage(tab, "assistant", `Attempt ${retries}/${state.settings.maxRetries} failed. Generating a fix...`);
-    addChatMessage(tab, "assistant", "", true); // Thinking indicator
+    addChatMessage(tab, "assistant", "Analyzing failure...", { isThinking: true });
 
     const fix = await sshApi.aiFixCommand({
       prompt,
@@ -1235,20 +1612,53 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => 
       settings: state.settings
     });
 
+    if (tab.abortController?.signal?.aborted) {
+      removeThinkingMessage(tab);
+      return;
+    }
+
     removeThinkingMessage(tab);
 
-    if (!fix.ok || !fix.command) {
+    if (!fix.ok) {
       addChatMessage(tab, "assistant", fix.error || "Could not generate a fix. Please try manually.");
       return;
     }
 
-    // Check if the AI returned the same command we already tried
-    if (failedCommands.includes(fix.command)) {
-      addChatMessage(tab, "assistant", "AI suggested the same command that already failed. Stopping to prevent infinite loop.");
+    // Check if the fix response says "abort" — permanent failure detected
+    if (fix.responseType === "abort") {
+      addChatMessage(tab, "impossible", fix.reason, { suggestion: fix.suggestion });
+      showToast("warning", "Cannot Fix", fix.rootCause === "os_incompatible" 
+        ? "Incompatible operating system" 
+        : "This issue cannot be resolved automatically");
       return;
     }
 
-    current = fix.command;
+    // Get the fixed command
+    const fixedCommand = fix.command;
+    if (!fixedCommand) {
+      addChatMessage(tab, "assistant", "AI could not generate a fix. Please try manually.");
+      return;
+    }
+
+    // Check duplicate
+    if (failedCommands.includes(fixedCommand)) {
+      addChatMessage(tab, "assistant", "AI suggested the same command that already failed. Stopping to prevent an infinite loop.");
+      return;
+    }
+
+    // Show fix explanation if available
+    if (fix.explanation) {
+      addChatMessage(tab, "assistant", fix.explanation);
+    }
+
+    // Show confidence warning for low confidence fixes
+    if (fix.confidence === "low") {
+      addChatMessage(tab, "assistant", "Note: AI confidence is low for this fix. It may not resolve the issue.");
+    }
+
+    current = fixedCommand;
+    // After first retry, always set risk to low for subsequent attempts
+    risk = "low";
   }
 };
 
@@ -1262,7 +1672,6 @@ sshApi.onSshData(({ tabId, data }) => {
   }
   if (tab) {
     tab.logs += data;
-    // Larger log buffer for better AI context
     if (tab.logs.length > 24000) {
       tab.logs = tab.logs.slice(-24000);
     }
@@ -1277,7 +1686,6 @@ sshApi.onSshStatus(({ tabId, status }) => {
       tab.status = "connected";
       showToast("success", "Connected", `Connected to ${tab.title}`);
 
-      // Auto-detect environment after connection (with a small delay for shell to be ready)
       if (!tab.envInfo) {
         setTimeout(() => detectEnvironment(tab), 1500);
       }
@@ -1441,7 +1849,6 @@ window.__closeSettings = hideSettings;
 openSettingsBtn?.addEventListener("click", showSettings);
 closeSettingsBtn?.addEventListener("click", hideSettings);
 
-// Close modals when clicking backdrop
 siteManagerModal?.addEventListener("click", (e) => {
   if (e.target === siteManagerModal) {
     hideSiteManager();
@@ -1454,7 +1861,6 @@ settingsModal?.addEventListener("click", (e) => {
   }
 });
 
-// Execution mode toggle
 modeButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     modeButtons.forEach((b) => b.classList.remove("active"));
@@ -1473,7 +1879,6 @@ saveSettingsBtn.addEventListener("click", () => {
   hideSettings();
   showToast("success", "Settings Saved", "Your preferences have been updated");
   
-  // Re-render active tab to update terminal theme
   renderActiveTab();
 });
 
@@ -1481,7 +1886,6 @@ saveSettingsBtn.addEventListener("click", () => {
 // Keyboard Shortcuts
 // ========================================
 document.addEventListener("keydown", (e) => {
-  // Escape to close modals
   if (e.key === "Escape") {
     if (!settingsModal.classList.contains("hidden")) {
       hideSettings();
@@ -1490,25 +1894,21 @@ document.addEventListener("keydown", (e) => {
     }
   }
   
-  // Ctrl/Cmd + , for settings
   if ((e.ctrlKey || e.metaKey) && e.key === ",") {
     e.preventDefault();
     showSettings();
   }
   
-  // Ctrl/Cmd + K for site manager
   if ((e.ctrlKey || e.metaKey) && e.key === "k") {
     e.preventDefault();
     showSiteManager();
   }
   
-  // Ctrl/Cmd + T for new tab
   if ((e.ctrlKey || e.metaKey) && e.key === "t") {
     e.preventDefault();
     createTab();
   }
   
-  // Ctrl/Cmd + W to close current tab
   if ((e.ctrlKey || e.metaKey) && e.key === "w" && state.activeTabId) {
     e.preventDefault();
     closeTab(state.activeTabId);
@@ -1522,7 +1922,6 @@ let resizeTimeout;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimeout);
   resizeTimeout = setTimeout(() => {
-    // Re-fit all terminal addons on resize
     state.tabs.forEach((tab) => {
       if (tab.fitAddon && tab.terminal) {
         try {

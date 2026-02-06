@@ -662,6 +662,414 @@ body.light-theme .terminal-body .xterm-viewport {
   border-radius: var(--radius-sm);
 }
 
+.chat-message.answer .answer-content .code-block {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.chat-message.answer .answer-content .code-block code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  white-space: pre;
+}
+
+/* ========================================
+   Impossible / Blocked Message
+   ======================================== */
+.chat-message.impossible {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(245, 158, 11, 0.12) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: var(--text-primary);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  max-width: 100%;
+}
+
+.impossible-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--error);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.impossible-header svg {
+  flex-shrink: 0;
+}
+
+.impossible-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-wrap: break-word;
+}
+
+.impossible-content strong {
+  font-weight: 700;
+  color: var(--error);
+}
+
+.impossible-suggestion {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.impossible-suggestion strong {
+  color: var(--warning);
+}
+
+/* ========================================
+   Info Message
+   ======================================== */
+.chat-message.info {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(6, 182, 212, 0.12) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: var(--text-primary);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  max-width: 100%;
+}
+
+.info-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-header svg {
+  flex-shrink: 0;
+}
+
+.info-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-wrap: break-word;
+}
+
+.info-content strong {
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+.info-content code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-sm);
+}
+
+/* ========================================
+   Clarification Message
+   ======================================== */
+.chat-message.clarification {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(251, 191, 36, 0.12) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: var(--text-primary);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  max-width: 100%;
+}
+
+.clarification-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warning);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.clarification-header svg {
+  flex-shrink: 0;
+}
+
+.clarification-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-wrap: break-word;
+  margin-bottom: 10px;
+}
+
+.clarification-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clarification-option {
+  padding: 6px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.clarification-option:hover {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+/* ========================================
+   Plan Message
+   ======================================== */
+.chat-message.plan {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  max-width: 100%;
+  padding: 0;
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.plan-header svg {
+  flex-shrink: 0;
+  color: var(--accent-primary);
+}
+
+.plan-content {
+  padding: 12px 14px;
+}
+
+.plan-explanation {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.plan-step.running {
+  border-color: var(--accent-primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.plan-step.done {
+  border-color: var(--success);
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.plan-step.failed {
+  border-color: var(--error);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.plan-step-number {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.plan-step.running .plan-step-number {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.plan-step.done .plan-step-number {
+  background: var(--success);
+  color: white;
+}
+
+.plan-step.failed .plan-step-number {
+  background: var(--error);
+  color: white;
+}
+
+.plan-step-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-step-desc {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.plan-step-cmd {
+  font-size: 11px;
+}
+
+.plan-step-cmd code {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.plan-step-status {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.plan-step.done .plan-step-status svg {
+  color: var(--success);
+}
+
+.plan-step.failed .plan-step-status svg {
+  color: var(--error);
+}
+
+.plan-step.running .plan-step-status .spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  color: var(--accent-primary);
+}
+
+/* ========================================
+   Copy Button
+   ======================================== */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0.5;
+  margin-left: auto;
+}
+
+.copy-btn:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
+}
+
+.copy-btn.copied {
+  color: var(--success);
+  opacity: 1;
+}
+
+.copy-btn.inline {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* ========================================
+   Stop Button
+   ======================================== */
+.stop-btn {
+  padding: 10px 20px;
+  background: var(--error);
+  color: white;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  border: none;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+}
+
+.stop-btn:hover {
+  background: #dc2626;
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.stop-btn:active {
+  transform: translateY(0);
+}
+
+/* ========================================
+   High Risk Confirmation
+   ======================================== */
+.chat-confirm.high-risk {
+  border-color: var(--error);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}
+
+.chat-confirm.high-risk .confirm-header {
+  color: var(--error);
+}
+
+.chat-confirm.high-risk .confirm-header svg {
+  color: var(--error);
+}
+
 .chat-message.assistant.thinking {
   display: flex;
   align-items: center;

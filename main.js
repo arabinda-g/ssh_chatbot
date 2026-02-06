@@ -56,8 +56,7 @@ const sanitizeCommand = (text) => {
     }
   }
 
-  // Remove any trailing explanation after the command (look for sentence-like patterns after the command)
-  // Only if there's a clear separator
+  // Remove any trailing explanation after the command
   const explSplit = cmd.split(/\n\n/);
   if (explSplit.length > 1) {
     cmd = explSplit[0].trim();
@@ -178,6 +177,7 @@ ipcMain.handle("ssh-connect", async (event, { tabId, config }) => {
         port: Number(config.port || 22),
         username: config.username,
         password: config.password,
+        privateKey: config.privateKey || undefined,
         readyTimeout: 20000
       });
   });
@@ -215,23 +215,23 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
     let resolved = false;
     let sudoHandled = false;
     let interactiveResponses = 0;
-    const maxInteractiveResponses = 5; // Prevent infinite loops
+    const maxInteractiveResponses = 5;
 
     // Dynamic timeout based on command type
     const timeout = getCommandTimeout(command);
 
     // Extended prompt patterns for various shells and configurations
     const promptPatterns = [
-      /\[.*@.*\][#$%>]\s*$/m,                    // [user@host]# or [user@host]$
-      /\S+@\S+[:~][^\n]*[#$%>]\s*$/m,            // user@host:~$ (flexible path)
-      /^[^@\n]+@[^:]+:[^$#]*[#$]\s*$/m,          // user@host:/path$
-      /^root@[^\s]+[:#][^\n]*[#$]\s*$/m,          // root@hostname:#
-      /^\w+@\w+[:\s~]*[$#%>]\s*$/m,              // simple user@host$
-      /^(?:bash|sh|zsh)-[\d.]+[#$%>]\s*$/m,      // bash-5.1$
-      /^\([\w-]+\)\s*\S+@\S+/m,                  // (venv) user@host
-      /^➜\s/m,                                    // oh-my-zsh arrow prompt
-      /^\S+\s*[❯›▶]\s*$/m,                       // fancy prompts
-      /^localhost[:#~][^\n]*[#$]\s*$/m,           // localhost:#
+      /\[.*@.*\][#$%>]\s*$/m,
+      /\S+@\S+[:~][^\n]*[#$%>]\s*$/m,
+      /^[^@\n]+@[^:]+:[^$#]*[#$]\s*$/m,
+      /^root@[^\s]+[:#][^\n]*[#$]\s*$/m,
+      /^\w+@\w+[:\s~]*[$#%>]\s*$/m,
+      /^(?:bash|sh|zsh)-[\d.]+[#$%>]\s*$/m,
+      /^\([\w-]+\)\s*\S+@\S+/m,
+      /^➜\s/m,
+      /^\S+\s*[❯›▶]\s*$/m,
+      /^localhost[:#~][^\n]*[#$]\s*$/m,
     ];
 
     const hasPrompt = (text) => {
@@ -251,7 +251,7 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
       passphrase: /Enter passphrase|Enter new password|New password:|Retype new password:/im,
     };
 
-    // Smart error detection - context-aware, not naive substring matching
+    // Smart error detection
     const detectError = (fullOutput) => {
       const clean = stripAnsi(fullOutput);
       const lines = clean.split("\n");
@@ -266,8 +266,8 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
         if (/^(?:bash|sh|zsh|fish): .+: command not found$/i.test(t)) errorScore += 3;
         if (/^(?:bash|sh|zsh|fish): .+: No such file or directory$/i.test(t)) errorScore += 3;
         if (/^-(?:bash|sh|zsh): .+: command not found$/i.test(t)) errorScore += 3;
-        if (/^E: (?!0\b)/.test(t)) errorScore += 3; // apt errors (not E: 0)
-        if (/^error\[/.test(t)) errorScore += 2; // rust/compiler style errors
+        if (/^E: (?!0\b)/.test(t)) errorScore += 3;
+        if (/^error\[/.test(t)) errorScore += 2;
         if (/^fatal:/i.test(t)) errorScore += 3;
         if (/^FATAL:/i.test(t)) errorScore += 3;
         if (/^ERROR:/i.test(t)) errorScore += 2;
@@ -285,7 +285,7 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
         // Success indicators
         if (/\b(?:success(?:fully)?|done|completed?|ok|started|enabled|active|running|created|installed|updated|configured|restarted|reloaded)\b/i.test(t)
           && !/\b(?:not|no|un|dis|fail|error)\b/i.test(t)) successScore += 1;
-        if (/^Setting up /i.test(t)) successScore += 1; // apt install progress
+        if (/^Setting up /i.test(t)) successScore += 1;
         if (/^Processing triggers/i.test(t)) successScore += 1;
         if (/is already the newest version/i.test(t)) successScore += 1;
         if (/^0 upgraded, 0 newly installed/i.test(t)) successScore += 1;
@@ -293,12 +293,10 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
 
         // Noise - things that look like errors but aren't
         if (/^(?:failed|error)\w*\s*[:=]\s*0\b/i.test(t)) successScore += 1;
-        if (/warning:/i.test(t)) { /* warnings are not errors */ }
       }
 
-      // If success signals dominate, it's not an error
       if (successScore > errorScore) return false;
-      return errorScore >= 2; // Require strong evidence of error
+      return errorScore >= 2;
     };
 
     const dataHandler = (data) => {
@@ -306,7 +304,7 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
       output += text;
 
       if (commandSent && !resolved) {
-        const recentOutput = output.slice(-500); // Check recent output for interactive prompts
+        const recentOutput = output.slice(-500);
 
         // Handle sudo password prompt
         if (!sudoHandled && interactivePatterns.sudo.test(recentOutput)) {
@@ -320,9 +318,8 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
           }
         }
 
-        // Handle confirmation prompts (y/n, yes/no, etc.)
+        // Handle confirmation prompts
         if (interactivePatterns.confirm.test(recentOutput) && interactiveResponses < maxInteractiveResponses) {
-          // Check if this is a new prompt (not one we already responded to)
           const confirmCount = (output.match(/\(y\/n\)|\[y\/N\]|\[Y\/n\]|\(yes\/no\)|Do you want to continue|Are you sure|Proceed\?|Continue\?/gi) || []).length;
           if (confirmCount > interactiveResponses - (sudoHandled ? 1 : 0)) {
             setTimeout(() => {
@@ -342,10 +339,10 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
           return;
         }
 
-        // Handle dpkg configuration prompts (keep existing config)
+        // Handle dpkg configuration prompts
         if (interactivePatterns.dpkg.test(recentOutput) && interactiveResponses < maxInteractiveResponses) {
           setTimeout(() => {
-            entry.shell.write("N\n"); // Keep local version by default
+            entry.shell.write("N\n");
           }, 100);
           interactiveResponses++;
           return;
@@ -360,18 +357,15 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
           return;
         }
 
-        // Check for command completion (prompt reappeared)
+        // Check for command completion
         const lines = output.split("\n");
         const lastNonEmpty = [...lines].reverse().find((l) => l.trim()) || "";
 
         if (hasPrompt(lastNonEmpty)) {
-          // Make sure we're not detecting the initial prompt before command output
-          // Wait for at least some output after the command was sent
           const afterCommand = output.slice(command.length + 1);
           if (afterCommand.trim().length > 0) {
             resolved = true;
 
-            // Give a delay to ensure everything is flushed
             setTimeout(() => {
               entry.shell.removeListener("data", dataHandler);
               const cleanOutput = stripAnsi(output);
@@ -414,7 +408,7 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
 });
 
 // ========================================
-// Silent Command Execution (non-interactive, for background tasks)
+// Silent Command Execution (non-interactive)
 // ========================================
 ipcMain.handle("ssh-exec-silent", async (_event, { tabId, command }) => {
   const entry = connections.get(tabId);
@@ -447,7 +441,6 @@ ipcMain.handle("ssh-exec-silent", async (_event, { tabId, command }) => {
         });
       });
 
-      // Timeout for silent exec
       setTimeout(() => {
         try { stream.close(); } catch (e) { /* ignore */ }
         resolve({
@@ -498,7 +491,46 @@ const callOpenAI = async ({ apiKey, model, messages, maxRetries }) => {
 };
 
 // ========================================
-// AI Command Generation - Super Intelligent Prompt
+// Parse structured AI JSON response safely
+// ========================================
+const parseAIJson = (text) => {
+  try {
+    let jsonText = text.trim();
+    // Remove markdown json wrapper if present
+    const jsonBlockMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (jsonBlockMatch) {
+      jsonText = jsonBlockMatch[1].trim();
+    }
+    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[0];
+    }
+    return JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+};
+
+// ========================================
+// Build environment context string
+// ========================================
+const buildEnvContext = (envInfo) => {
+  if (!envInfo) return "";
+  return `
+## Target System Environment:
+- OS: ${envInfo.os || "Unknown"}
+- Distribution: ${envInfo.distro || "Unknown"} (ID: ${envInfo.distroId || "unknown"}, Version: ${envInfo.version || "unknown"})
+- Shell: ${envInfo.shell || "Unknown"}
+- User: ${envInfo.user || "Unknown"}
+- Package Manager: ${envInfo.packageManager || "Unknown"}
+- Init System: ${envInfo.initSystem || "Unknown"}
+- Architecture: ${envInfo.arch || "Unknown"}
+`;
+};
+
+// ========================================
+// AI: Analyze Request (Super Intelligent)
+// Replaces the old ai-get-command with a much smarter system
 // ========================================
 ipcMain.handle(
   "ai-get-command",
@@ -507,68 +539,87 @@ ipcMain.handle(
       return { ok: false, error: "Missing OpenAI API key" };
     }
 
-    const envSection = envInfo
-      ? `\n## Target System:\n- OS: ${envInfo.os || "Unknown"}\n- Distro: ${envInfo.distro || "Unknown"}\n- Shell: ${envInfo.shell || "Unknown"}\n- User: ${envInfo.user || "Unknown"}\n- Package Manager: ${envInfo.packageManager || "Unknown"}\n- Init System: ${envInfo.initSystem || "Unknown"}\n- Architecture: ${envInfo.arch || "Unknown"}\n`
-      : "";
+    const envSection = buildEnvContext(envInfo);
 
-    const systemPrompt = `You are an expert Linux/Unix system administrator AI embedded in an SSH terminal client. You generate precise, production-ready shell commands to accomplish the user's request on their remote server.
+    const systemPrompt = `You are an expert Linux/Unix system administrator AI embedded in an SSH terminal client. You analyze user requests and respond intelligently.
 
-## ABSOLUTE RULES (never break these):
-1. Respond with ONLY the raw shell command(s). NOTHING else. No explanations, no markdown, no code blocks, no backtick wrapping, no comments, no "here's the command" preamble.
-2. If multiple sequential commands are needed, chain them with && (stop on failure) or ; (continue regardless).
-3. ALWAYS use non-interactive flags to prevent the command from hanging:
-   - apt/apt-get: use -y (e.g., apt-get install -y nginx)
-   - yum/dnf: use -y
-   - pacman: use --noconfirm
-   - pip: use --yes or skip confirmation
-   - npm: use --yes
-   - rm: use -f when appropriate
-   - cp/mv: use -f when appropriate  
-   - For dpkg: use DEBIAN_FRONTEND=noninteractive
-   - General: always prefer non-interactive mode
-4. For config file modifications, use sed, awk, or tee. NEVER use interactive editors (vi, vim, nano, emacs, joe).
-5. After modifying service configs, ALWAYS include the service reload/restart command (e.g., systemctl restart nginx).
-6. When root privileges are needed, prefix with sudo.
-7. Prefer modern tools: systemctl over service, ip over ifconfig, ss over netstat, journalctl over /var/log.
-8. For file viewing, prefer cat, head, tail, less, or specific tools. For searching, use grep, find, or locate.
-9. Commands should produce clean, parseable output when possible.
-10. When installing software, always update package lists first if needed (apt-get update && apt-get install -y ...).
+## YOUR RESPONSE FORMAT
+You MUST respond with ONLY a JSON object (no markdown wrapping, no backticks around the JSON). Use one of these response types:
 
-## INTELLIGENT BEHAVIORS:
-- For service management: check status, start/stop/restart, enable/disable on boot
-- For user management: useradd, usermod, passwd, groups, sudoers
-- For firewall: use ufw (Ubuntu/Debian) or firewalld (RHEL/CentOS) based on distro
-- For SSL/TLS: use certbot when available, openssl for manual operations
-- For Docker: use docker compose (v2) over docker-compose, handle common operations
-- For databases: MySQL/MariaDB/PostgreSQL CLI operations, backups, restores
-- For web servers: nginx/apache config testing, virtual hosts, SSL setup
-- For monitoring: disk space, memory, CPU, processes, logs, network connections
-- For networking: DNS, IP config, routing, port checking, firewall rules
-- For file permissions: chmod, chown, ACLs
-- For cron jobs: crontab management, systemd timers
-- For logs: journalctl, log rotation, log searching
-- For backups: tar, rsync, pg_dump, mysqldump
-- For security: SSH hardening, fail2ban, password policies, audit logs
+### Type 1: "command" - When you can fulfill the request with shell commands
+{"type":"command","command":"the shell command(s) here","explanation":"brief 1-sentence explanation of what this will do","risk":"low|medium|high","estimatedTime":"fast|moderate|slow"}
 
+### Type 2: "impossible" - When the request CANNOT be fulfilled on this system
+{"type":"impossible","reason":"clear explanation of why this is impossible","suggestion":"alternative approach if any exists, or null"}
+
+### Type 3: "plan" - When the request requires multiple sequential steps that should be tracked
+{"type":"plan","title":"short title for the plan","steps":[{"command":"cmd1","description":"what step 1 does"},{"command":"cmd2","description":"what step 2 does"}],"explanation":"overview of the plan"}
+
+### Type 4: "info" - When the user is asking a question that doesn't need a command
+{"type":"info","answer":"your informative answer here"}
+
+### Type 5: "clarification" - When you need more information to proceed
+{"type":"clarification","question":"what you need to know","options":["option 1","option 2"]}
+
+## CRITICAL INTELLIGENCE RULES:
+
+### Feasibility Checks (ALWAYS perform these FIRST):
+1. **OS Compatibility**: Before suggesting software installation, verify the software supports the target OS/distro. Examples:
+   - CentOS Web Panel (CWP) ONLY works on CentOS/RHEL/AlmaLinux/Rocky Linux — respond "impossible" on Ubuntu/Debian
+   - cPanel requires CentOS/AlmaLinux/CloudLinux — respond "impossible" on Ubuntu/Debian
+   - apt/dpkg commands on RHEL/CentOS — respond "impossible", suggest yum/dnf
+   - yum/dnf commands on Ubuntu/Debian — respond "impossible", suggest apt
+2. **Architecture Compatibility**: Check if software supports the target architecture (arm64 vs x86_64)
+3. **Permission Level**: Check if the user has sufficient privileges (root vs regular user)
+4. **Resource Requirements**: For heavy operations (databases, web servers), consider if the system likely has enough resources
+5. **Software Availability**: Don't suggest packages that don't exist in the system's repositories
+
+### When to Use "impossible":
+- Software explicitly doesn't support the target OS/distro
+- Hardware/architecture mismatch
+- Fundamental technical limitation (e.g., running Docker in Docker without privileged mode)
+- The operation would break SSH connectivity with no recovery path
+- The user is asking to do something that contradicts physics/logic
+
+### When to Use "plan" (multi-step):
+- Installing complex software stacks (LAMP, LEMP, etc.)
+- System hardening / security setup
+- Setting up services that require config changes + restarts
+- Database migrations or complex backups
+- Any task with 3+ distinct steps that depend on each other
+
+### When to Use "info":
+- User asks "what is...", "how does...", "explain..."
+- User asks about system status without needing a command
+- User asks for recommendations or comparisons
+
+### When to Use "clarification":
+- The request is ambiguous (e.g., "set up a server" — what kind?)
+- Multiple valid approaches exist and the choice matters
+- Missing critical information (e.g., domain name for SSL setup)
+
+## COMMAND GENERATION RULES (when type is "command" or "plan"):
+1. ALWAYS use non-interactive flags: -y for apt/yum, --noconfirm for pacman, DEBIAN_FRONTEND=noninteractive
+2. For config file edits, use sed/awk/tee. NEVER suggest vi/vim/nano/emacs
+3. Chain related commands with && (stop on failure) or ; (continue regardless)
+4. When root privileges are needed, prefix with sudo
+5. After modifying service configs, include service reload/restart
+6. For installations, update package lists first if needed
+7. Prefer modern tools: systemctl over service, ip over ifconfig
+8. For potentially destructive operations, add safety checks
+${envSection}
 ## CONTEXT UNDERSTANDING:
-- Short follow-up messages (1-5 words) ALWAYS relate to the previous conversation topic.
-- "in root" after disk space → df for root mount, NOT cd /
-- "for nginx" after config → show nginx configuration
+- Short follow-up messages (1-5 words) ALWAYS relate to the previous conversation topic
 - "again" → repeat the last type of operation
 - "undo" or "revert" → reverse the last operation
-- "it" or "that" → the subject of the previous exchange
-- "more" or "details" → more detail on the same topic
-- "all" → broader scope of the same topic
-- Numbers or sizes → parameters for the previous topic
-- "yes", "ok", "do it" → execute the previously suggested operation
-- "check" or "verify" → verify the result of the last operation
 - "fix" or "solve" → fix the issue from the last output
-${envSection}
+- "check" or "verify" → verify the result of the last operation
+- "yes", "ok", "do it" → execute the previously suggested operation
+
 ## SAFETY:
-- For potentially destructive operations (rm -rf, dd, mkfs, fdisk), ensure precise targeting.
-- For operations that could break SSH connectivity (iptables, sshd config, network config), test before applying when possible.
-- When restarting SSH, use: sudo systemctl restart sshd || sudo systemctl restart ssh (handle both service names).
-- Prefer atomic operations when possible (mv over cp+rm, sed -i.bak over sed -i for config changes).`;
+- For operations that could break SSH (iptables, sshd config, network), test before applying
+- Prefer atomic operations (mv over cp+rm, sed -i.bak over sed -i)
+- risk "high" for: rm -rf, dd, mkfs, fdisk, iptables, sshd restarts, partition changes`;
 
     const messages = [{ role: "system", content: systemPrompt }];
 
@@ -595,14 +646,88 @@ ${envSection}
       return result;
     }
 
-    // Sanitize the AI response to extract clean command
+    // Parse the structured JSON response
+    const parsed = parseAIJson(result.text);
+
+    if (parsed && parsed.type) {
+      switch (parsed.type) {
+        case "command":
+          return {
+            ok: true,
+            responseType: "command",
+            command: sanitizeCommand(parsed.command || ""),
+            explanation: parsed.explanation || "",
+            risk: parsed.risk || "low",
+            estimatedTime: parsed.estimatedTime || "fast"
+          };
+
+        case "impossible":
+          return {
+            ok: true,
+            responseType: "impossible",
+            reason: parsed.reason || "This operation cannot be performed on this system.",
+            suggestion: parsed.suggestion || null
+          };
+
+        case "plan":
+          return {
+            ok: true,
+            responseType: "plan",
+            title: parsed.title || "Execution Plan",
+            steps: (parsed.steps || []).map((s) => ({
+              command: sanitizeCommand(s.command || ""),
+              description: s.description || ""
+            })),
+            explanation: parsed.explanation || ""
+          };
+
+        case "info":
+          return {
+            ok: true,
+            responseType: "info",
+            answer: parsed.answer || result.text
+          };
+
+        case "clarification":
+          return {
+            ok: true,
+            responseType: "clarification",
+            question: parsed.question || "Could you provide more details?",
+            options: parsed.options || []
+          };
+
+        default:
+          // Unknown type, try to use as command
+          return {
+            ok: true,
+            responseType: "command",
+            command: sanitizeCommand(result.text),
+            explanation: "",
+            risk: "low",
+            estimatedTime: "fast"
+          };
+      }
+    }
+
+    // Fallback: if JSON parsing failed, treat as a raw command (backward compat)
     const command = sanitizeCommand(result.text);
-    return { ok: true, command };
+    if (command) {
+      return {
+        ok: true,
+        responseType: "command",
+        command,
+        explanation: "",
+        risk: "low",
+        estimatedTime: "fast"
+      };
+    }
+
+    return { ok: false, error: "AI returned an unparseable response." };
   }
 );
 
 // ========================================
-// AI Command Fixing - With Rich Context
+// AI: Smart Fix Command with Root Cause Analysis
 // ========================================
 ipcMain.handle(
   "ai-fix-command",
@@ -611,45 +736,62 @@ ipcMain.handle(
       return { ok: false, error: "Missing OpenAI API key" };
     }
 
-    const envSection = envInfo
-      ? `\nTarget system: ${envInfo.distro || envInfo.os || "Linux"} (${envInfo.arch || "unknown arch"}), shell: ${envInfo.shell || "bash"}, user: ${envInfo.user || "unknown"}, pkg: ${envInfo.packageManager || "unknown"}`
-      : "";
+    const envSection = buildEnvContext(envInfo);
 
     const failedSection = failedCommands && failedCommands.length > 0
-      ? `\nPreviously failed commands (DO NOT repeat these):\n${failedCommands.map((c, i) => `  ${i + 1}. ${c}`).join("\n")}`
+      ? `\nPreviously failed commands (DO NOT repeat these exact commands):\n${failedCommands.map((c, i) => `  ${i + 1}. ${c}`).join("\n")}`
       : "";
 
     const historySection = chatHistory && chatHistory.length > 0
-      ? `\nConversation context:\n${chatHistory.slice(-8).join("\n")}`
+      ? `\nConversation context:\n${chatHistory.slice(-10).join("\n")}`
       : "";
 
-    const systemPrompt = `You are an expert system administrator debugging a failed command on a remote Linux server. Analyze the error and provide a corrected command.
+    const systemPrompt = `You are an expert system administrator debugging a failed command on a remote Linux server.
 
-RULES:
-1. Respond with ONLY the corrected command. No explanations, no markdown, no backticks.
-2. NEVER repeat a command that already failed - try a genuinely different approach.
-3. Always use non-interactive flags (-y, --yes, --noconfirm, DEBIAN_FRONTEND=noninteractive).
-4. For config edits, use sed/awk/tee. Never suggest interactive editors.
-5. If multiple steps are needed, chain with && or ;.
+You MUST respond with ONLY a JSON object (no markdown wrapping). Use one of these response types:
 
-COMMON FIX STRATEGIES:
-- "command not found" → Install the package first (apt-get update && apt-get install -y <pkg>), or use the correct binary name/path
-- "permission denied" → Add sudo, or fix file permissions first
-- "No such file or directory" → Create parent directories first (mkdir -p), or check the correct path
-- "E: Unable to locate package" → Run apt-get update first, check package name for the distro
-- "port already in use" → Find (lsof -i :<port>) and kill the process, or use a different port
-- "dpkg lock" → Wait and retry, or kill stuck apt process: sudo kill $(sudo lsof /var/lib/dpkg/lock-frontend 2>/dev/null | awk 'NR>1{print $2}') 2>/dev/null; sudo dpkg --configure -a &&
-- "Connection refused" → Check if service is running, check firewall, check correct port
-- "Authentication failed" → Check credentials, check service config
-- "Disk full" → Clear space first (apt-get clean, remove old logs, etc.)
-- "Syntax error" → Fix the command syntax
-- Already tried with sudo but still fails → Check if command exists, try alternative approach${envSection}`;
+### Type 1: "fix" - You have a different command that should work
+{"type":"fix","command":"the corrected command","explanation":"what was wrong and what this fix does","confidence":"high|medium|low"}
+
+### Type 2: "abort" - The task is FUNDAMENTALLY IMPOSSIBLE or will never succeed with command changes
+{"type":"abort","reason":"clear explanation of why this cannot work","rootCause":"category of the problem","suggestion":"alternative approach if any, or null"}
+
+## ROOT CAUSE CATEGORIES for "abort":
+- "os_incompatible" — Software doesn't support this OS/distro
+- "arch_incompatible" — Software doesn't support this architecture
+- "missing_hardware" — Required hardware (GPU, etc.) not available
+- "permission_permanent" — Requires access level that can't be granted
+- "resource_exhausted" — System lacks resources (disk, memory) that can't be freed
+- "network_unreachable" — Required network resource permanently unavailable
+- "software_conflict" — Irreconcilable software conflict
+- "deprecated" — Software is deprecated/EOL with no replacement path
+- "circular_dependency" — The fix creates the same problem it's trying to solve
+
+## CRITICAL RULES:
+1. NEVER repeat a command that already failed — try a genuinely DIFFERENT approach
+2. If the SAME error keeps occurring across multiple attempts, it's likely a fundamental issue → use "abort"
+3. If the error is about OS/distro incompatibility → ALWAYS use "abort" with rootCause "os_incompatible"
+4. If you've seen 3+ failures with similar errors → strongly consider "abort"
+5. Confidence "low" means you're not sure the fix will work — be honest
+6. Always use non-interactive flags (-y, --yes, --noconfirm, DEBIAN_FRONTEND=noninteractive)
+7. For config edits, use sed/awk/tee, never interactive editors
+
+## FIX STRATEGIES (in order of preference):
+- Missing package → install it first
+- Permission denied → add sudo, fix permissions
+- File not found → create parent dirs, check correct path
+- Package not found → update repos, check package name for distro
+- Port in use → find and handle the process
+- Dpkg lock → wait/kill stuck process
+- Syntax error → fix the syntax
+- Wrong approach entirely → try a completely different method
+${envSection}`;
 
     const messages = [
       { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: `Goal: ${prompt}${historySection}${failedSection}\n\nLatest error output:\n${logs}`
+        content: `Original goal: ${prompt}${historySection}${failedSection}\n\nLatest error output:\n${logs}`
       }
     ];
 
@@ -664,8 +806,44 @@ COMMON FIX STRATEGIES:
       return result;
     }
 
+    const parsed = parseAIJson(result.text);
+
+    if (parsed) {
+      if (parsed.type === "abort") {
+        return {
+          ok: true,
+          responseType: "abort",
+          reason: parsed.reason || "This task cannot be completed.",
+          rootCause: parsed.rootCause || "unknown",
+          suggestion: parsed.suggestion || null
+        };
+      }
+
+      if (parsed.type === "fix") {
+        const command = sanitizeCommand(parsed.command || "");
+        return {
+          ok: true,
+          responseType: "fix",
+          command,
+          explanation: parsed.explanation || "",
+          confidence: parsed.confidence || "medium"
+        };
+      }
+    }
+
+    // Fallback: treat as raw command
     const command = sanitizeCommand(result.text);
-    return { ok: true, command };
+    if (command) {
+      return {
+        ok: true,
+        responseType: "fix",
+        command,
+        explanation: "",
+        confidence: "low"
+      };
+    }
+
+    return { ok: false, error: "AI could not generate a fix." };
   }
 );
 
@@ -684,9 +862,8 @@ ipcMain.handle(
       contextInfo = `Previous conversation:\n${chatHistory.slice(-10).join("\n")}\n\n`;
     }
 
-    // Clean the output for AI processing
+    // Clean and potentially truncate output
     const cleanOutput = stripAnsi(output);
-    // Truncate very long outputs but keep beginning and end
     let processedOutput = cleanOutput;
     if (cleanOutput.length > 8000) {
       const head = cleanOutput.slice(0, 3000);
@@ -699,31 +876,36 @@ ipcMain.handle(
 You MUST respond in this exact JSON format (no markdown wrapping, just raw JSON):
 {
   "success": true or false,
-  "answer": "your human-friendly interpretation here"
+  "answer": "your human-friendly interpretation here",
+  "permanentFailure": true or false,
+  "failureCategory": "string or null"
 }
 
 RULES FOR "success" field:
-- true: The command achieved its intended goal (installed software, changed config, showed info, etc.)
-- false: The command failed to achieve its goal (error occurred, permission denied, package not found, etc.)
-- If the command was informational (ls, cat, df, etc.) and produced output, it's SUCCESS.
-- If the output contains errors but also shows the operation completed, it's SUCCESS.
-- If the output shows warnings but no errors, it's SUCCESS.
-- "No such file", "command not found", "permission denied", "failed", segfaults → FAILED
-- Empty output for commands that should produce output → context-dependent (some commands like cp, mv, chmod produce no output on success)
+- true: The command achieved its intended goal
+- false: The command failed to achieve its goal
+
+RULES FOR "permanentFailure" field (ONLY when success is false):
+- true: This failure is PERMANENT and cannot be fixed by retrying or changing commands
+  Examples: wrong OS for software, hardware missing, unsupported architecture, deprecated software
+- false: This failure might be fixable with a different command or approach
+  Examples: package not found (might just need different name), permission denied (can add sudo), syntax error (can fix)
+
+RULES FOR "failureCategory" (ONLY when permanentFailure is true):
+- "os_incompatible" — Software requires a different OS/distro
+- "arch_incompatible" — Wrong CPU architecture
+- "missing_hardware" — Required hardware not available
+- "unsupported" — Operation fundamentally not supported
+- null — When not a permanent failure
 
 RULES FOR "answer" field:
-- Be concise but thorough. Use **bold** for important values and metrics.
-- If the output contains data (disk space, memory, processes), summarize the key points with actual numbers.
+- Be concise but thorough. Use **bold** for important values.
+- If the output contains data (disk space, memory, processes), summarize key points with numbers.
 - If the command modified something, confirm what was changed.
-- If there are warnings or notable findings, mention them.
-- If the output suggests follow-up actions are needed, mention them briefly.
-- For config changes: confirm the change was applied and if the service was restarted.
-- For installations: confirm what was installed and the version if shown.
-- For errors: explain what went wrong and suggest what to try.
-- Use bullet points (- item) for lists of items.
+- For errors: explain what went wrong and whether it's fixable.
+- Use bullet points (- item) for lists.
 - Format code/paths/values with backtick markers.
-- Do NOT repeat the raw output unless a small excerpt is essential for clarity.
-- Do NOT include the command itself in your answer.
+- Do NOT repeat the raw output unless a small excerpt is essential.
 - Keep answers focused: 2-6 sentences for simple operations, more for complex output.`;
 
     const messages = [
@@ -745,30 +927,27 @@ RULES FOR "answer" field:
       return result;
     }
 
-    // Parse JSON response from AI
-    try {
-      // Try to extract JSON from the response (handle cases where AI wraps in markdown)
-      let jsonText = result.text.trim();
-      const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        jsonText = jsonMatch[0];
-      }
-      const parsed = JSON.parse(jsonText);
+    const parsed = parseAIJson(result.text);
+
+    if (parsed) {
       return {
         ok: true,
         answer: parsed.answer || result.text,
-        commandSucceeded: parsed.success !== false
-      };
-    } catch {
-      // If JSON parsing fails, treat the response as a plain text answer
-      // Try to detect success/failure from the text
-      const isFailure = /^(?:FAILED|ERROR|The command failed)/i.test(result.text);
-      return {
-        ok: true,
-        answer: result.text,
-        commandSucceeded: !isFailure
+        commandSucceeded: parsed.success !== false,
+        permanentFailure: parsed.permanentFailure === true,
+        failureCategory: parsed.failureCategory || null
       };
     }
+
+    // Fallback
+    const isFailure = /^(?:FAILED|ERROR|The command failed)/i.test(result.text);
+    return {
+      ok: true,
+      answer: result.text,
+      commandSucceeded: !isFailure,
+      permanentFailure: false,
+      failureCategory: null
+    };
   }
 );
 
@@ -804,9 +983,7 @@ ipcMain.handle(
       return result;
     }
 
-    // Clean up the title
     let title = result.text.trim().replace(/^["']|["']$/g, "").replace(/\.$/, "");
-    // Ensure reasonable length
     if (title.length > 40) {
       title = title.slice(0, 40).trim();
     }
