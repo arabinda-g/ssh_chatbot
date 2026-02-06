@@ -376,6 +376,21 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
           return;
         }
 
+        // Handle TUI/ncurses/debconf dialog prompts (e.g. Postfix config, phpmyadmin, etc.)
+        // Detect dialogs by looking for <Ok>, <Yes>, <No> buttons in the output
+        const cleanRecent = stripAnsi(recentOutput);
+        if (/<Ok>|<Yes>|<No>/.test(cleanRecent) && interactiveResponses < maxInteractiveResponses) {
+          // Check it looks like a real dialog (has box-drawing or "Package configuration" context)
+          if (/Package configuration|Configuration|configur/i.test(cleanRecent) || /[─│┌┐└┘╔╗╚╝═║\+\-\|]{3,}/.test(cleanRecent)) {
+            // Send Tab (to highlight <Ok>/<Yes>) then Enter to dismiss
+            setTimeout(() => {
+              entry.shell.write("\t\n");
+            }, 300);
+            interactiveResponses++;
+            return;
+          }
+        }
+
         // Handle auth prompts (git username/password, API tokens) — abort and report
         if (interactivePatterns.authPrompt.test(recentOutput) && !resolved) {
           resolved = true;
@@ -662,11 +677,13 @@ Each step.command must be a SINGLE, SHORT, self-contained command. NEVER chain m
 - Missing critical information (e.g., domain name for SSL setup)
 
 ## COMMAND RULES (for both "command" and plan step commands):
-1. ALWAYS use non-interactive flags: -y for apt/yum, --noconfirm for pacman, DEBIAN_FRONTEND=noninteractive
-2. For config file edits, use sed/awk/tee. NEVER suggest vi/vim/nano/emacs
-3. When root privileges are needed, prefix with sudo (WITHOUT the -n flag)
-4. **NEVER use "sudo -n"** — the terminal handles sudo password prompts automatically. Using -n causes failures.
-5. Prefer modern tools: systemctl over service, ip over ifconfig
+1. ALWAYS use non-interactive flags: -y for apt/yum, --noconfirm for pacman
+2. **CRITICAL: For ALL apt-get/apt/dpkg commands, ALWAYS prefix with DEBIAN_FRONTEND=noninteractive**. Example: \`sudo DEBIAN_FRONTEND=noninteractive apt-get install -y postfix\` — NOT \`sudo apt-get install -y postfix\`. This prevents debconf/ncurses dialogs from blocking automation. NEVER omit this.
+3. For packages that need specific debconf configuration (e.g. postfix mail type, phpmyadmin web server), pre-seed with debconf-set-selections BEFORE installing. Example: \`echo "postfix postfix/main_mailer_type select Internet Site" | sudo debconf-set-selections\`
+4. For config file edits, use sed/awk/tee. NEVER suggest vi/vim/nano/emacs
+5. When root privileges are needed, prefix with sudo (WITHOUT the -n flag)
+6. **NEVER use "sudo -n"** — the terminal handles sudo password prompts automatically. Using -n causes failures.
+7. Prefer modern tools: systemctl over service, ip over ifconfig
 ${envSection}
 ## CONTEXT UNDERSTANDING:
 - Short follow-up messages (1-5 words) ALWAYS relate to the previous conversation topic
@@ -838,9 +855,11 @@ Each step must contain exactly ONE short command. NEVER chain with && or ;.
 3. If the error is about OS/distro incompatibility → ALWAYS use "abort" with rootCause "os_incompatible"
 4. If you've seen 3+ failures with similar errors → strongly consider "abort"
 5. Confidence "low" means you're not sure the fix will work — be honest
-6. Always use non-interactive flags (-y, --yes, --noconfirm, DEBIAN_FRONTEND=noninteractive)
-7. For config edits, use sed/awk/tee, never interactive editors
-8. NEVER use "sudo -n" — the terminal handles sudo password prompts automatically.
+6. Always use non-interactive flags (-y, --yes, --noconfirm)
+7. **CRITICAL: ALWAYS prefix apt-get/apt/dpkg commands with DEBIAN_FRONTEND=noninteractive** to prevent debconf dialogs. Example: \`sudo DEBIAN_FRONTEND=noninteractive apt-get install -y postfix\`
+8. If the error mentions "debconf", "dialog", "Package configuration", or "ncurses", the fix is to re-run with DEBIAN_FRONTEND=noninteractive and pre-seed debconf-set-selections if needed.
+9. For config edits, use sed/awk/tee, never interactive editors
+10. NEVER use "sudo -n" — the terminal handles sudo password prompts automatically.
 9. If the original command was a long chained command (using && or ;), ALWAYS respond with "plan" to break it into individual steps.
 10. Each fix command or plan step must be ONE simple, short command. No chaining.
 
