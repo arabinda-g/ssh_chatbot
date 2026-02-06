@@ -582,6 +582,162 @@ const connectTab = async (tab) => {
   });
 };
 
+// ========================================
+// Tab Context Menu
+// ========================================
+const hideTabContextMenu = () => {
+  const existing = document.querySelector(".tab-context-menu");
+  if (existing) existing.remove();
+};
+
+const showTabContextMenu = (e, tab) => {
+  e.preventDefault();
+  e.stopPropagation();
+  hideTabContextMenu();
+
+  const isConnected = tab.status === "connected";
+  const isDisconnected = tab.status === "disconnected" || tab.status === "error";
+  const hasSite = !!tab.site;
+
+  const menu = document.createElement("div");
+  menu.className = "tab-context-menu";
+  menu.innerHTML = `
+    <div class="ctx-item ${hasSite && isDisconnected ? "" : "disabled"}" data-action="reconnect">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </svg>
+      Reconnect
+    </div>
+    <div class="ctx-item ${isConnected ? "" : "disabled"}" data-action="disconnect">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18.36 6.64A9 9 0 0 1 20.77 15"/><path d="M6.16 6.16a9 9 0 1 0 12.68 12.68"/><line x1="2" y1="2" x2="22" y2="22"/>
+      </svg>
+      Disconnect
+    </div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item ${hasSite ? "" : "disabled"}" data-action="duplicate">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>
+      Duplicate Tab
+    </div>
+    <div class="ctx-item" data-action="rename">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+      </svg>
+      Rename
+    </div>
+    <div class="ctx-item" data-action="clear-chat">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+      </svg>
+      Clear Chat
+    </div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item danger" data-action="close">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+      Close Tab
+    </div>
+  `;
+
+  // Position the menu
+  document.body.appendChild(menu);
+  const menuRect = menu.getBoundingClientRect();
+  let x = e.clientX;
+  let y = e.clientY;
+  if (x + menuRect.width > window.innerWidth) x = window.innerWidth - menuRect.width - 8;
+  if (y + menuRect.height > window.innerHeight) y = window.innerHeight - menuRect.height - 8;
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+
+  // Handle actions
+  menu.addEventListener("click", async (ev) => {
+    const item = ev.target.closest(".ctx-item");
+    if (!item || item.classList.contains("disabled")) return;
+    const action = item.dataset.action;
+    hideTabContextMenu();
+
+    switch (action) {
+      case "reconnect":
+        if (tab.site) {
+          // Disconnect first to clean up
+          await sshApi.sshDisconnect({ tabId: tab.id });
+          tab.status = "connecting";
+          tab.statusText = "Reconnecting...";
+          renderTabs();
+          renderActiveTab();
+          const res = await sshApi.sshConnect({ tabId: tab.id, config: tab.site });
+          if (res.ok) {
+            showToast("success", "Reconnected", `Connected to ${tab.title}`);
+            // Re-detect environment
+            setTimeout(() => detectEnvironment(tab), 1500);
+          } else {
+            showToast("error", "Failed", res.error || "Could not reconnect");
+          }
+        }
+        break;
+
+      case "disconnect":
+        await sshApi.sshDisconnect({ tabId: tab.id });
+        tab.status = "disconnected";
+        tab.statusText = "Disconnected";
+        renderTabs();
+        renderActiveTab();
+        showToast("info", "Disconnected", `Disconnected from ${tab.title}`);
+        break;
+
+      case "duplicate":
+        if (tab.site) {
+          await createTab(tab.site);
+        }
+        break;
+
+      case "rename": {
+        const newName = prompt("Rename tab:", tab.title);
+        if (newName && newName.trim()) {
+          tab.title = newName.trim();
+          renderTabs();
+        }
+        break;
+      }
+
+      case "clear-chat":
+        tab.chat = [];
+        tab.logs = "";
+        renderChat(tab);
+        saveCurrentSession(tab);
+        showToast("info", "Cleared", "Chat history cleared");
+        break;
+
+      case "close":
+        closeTab(tab.id);
+        break;
+    }
+  });
+
+  // Close on click outside or Escape
+  const closeHandler = (ev) => {
+    if (!menu.contains(ev.target)) {
+      hideTabContextMenu();
+      document.removeEventListener("click", closeHandler);
+      document.removeEventListener("contextmenu", closeHandler);
+    }
+  };
+  const escHandler = (ev) => {
+    if (ev.key === "Escape") {
+      hideTabContextMenu();
+      document.removeEventListener("keydown", escHandler);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener("click", closeHandler);
+    document.addEventListener("contextmenu", closeHandler);
+    document.addEventListener("keydown", escHandler);
+  }, 0);
+};
+
 const renderTabs = () => {
   tabsEl.innerHTML = "";
   
@@ -608,6 +764,10 @@ const renderTabs = () => {
     tabBtn.querySelector('[data-action="close"]').addEventListener("click", (e) => {
       e.stopPropagation();
       closeTab(tab.id);
+    });
+
+    tabBtn.addEventListener("contextmenu", (e) => {
+      showTabContextMenu(e, tab);
     });
     
     tabsEl.appendChild(tabBtn);

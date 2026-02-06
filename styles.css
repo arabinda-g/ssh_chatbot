@@ -2160,3 +2160,65 @@ select:focus-visible {
 .chat-confirm .confirm-execute {
   padding: 8px 16px;
 }
+
+/* ========================================
+   Tab Context Menu
+   ======================================== */
+.tab-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 180px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  animation: ctxMenuIn 0.12s ease-out;
+}
+
+@keyframes ctxMenuIn {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.tab-context-menu .ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.1s;
+  user-select: none;
+}
+
+.tab-context-menu .ctx-item:hover {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.tab-context-menu .ctx-item:hover svg {
+  stroke: white;
+}
+
+.tab-context-menu .ctx-item.disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.tab-context-menu .ctx-item.danger {
+  color: var(--error);
+}
+
+.tab-context-menu .ctx-item.danger:hover {
+  background: var(--error);
+  color: white;
+}
+
+.tab-context-menu .ctx-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
+}
