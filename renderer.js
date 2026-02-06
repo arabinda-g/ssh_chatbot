@@ -1401,7 +1401,7 @@ const showPlanFailureOptions = (tab, stepNum, totalSteps) => {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
         </svg>
-        Step ${stepNum} of ${totalSteps} failed. What would you like to do?
+        Step ${stepNum}/${totalSteps} failed after auto-fix attempts. What would you like to do?
       </div>
       <div class="plan-failure-actions">
         <button class="plan-action-btn retry" data-action="retry">
@@ -1438,7 +1438,161 @@ const showPlanFailureOptions = (tab, stepNum, totalSteps) => {
 };
 
 // ========================================
-// Execute Multi-Step Plan
+// Execute a single command, interpret result, return success/failure info
+// ========================================
+const executeAndInterpret = async (tab, command, contextPrompt, chatHistory) => {
+  const result = await sshApi.sshExec({
+    tabId: tab.id,
+    command,
+    password: tab.site?.password || ""
+  });
+
+  if (tab.abortController?.signal?.aborted) {
+    return { aborted: true };
+  }
+
+  const logs = [result.stdout || "", result.stderr || "", result.error || ""].filter(Boolean).join("\n");
+  tab.logs += `\n$ ${command}\n${logs}\n`;
+
+  if (result.timedOut) {
+    return { ok: false, timedOut: true, logs };
+  }
+
+  const interpretation = await sshApi.aiInterpretOutput({
+    prompt: contextPrompt,
+    command,
+    output: result.cleanStdout || result.stdout || "",
+    chatHistory,
+    envInfo: tab.envInfo || null,
+    settings: state.settings
+  });
+
+  if (tab.abortController?.signal?.aborted) {
+    return { aborted: true };
+  }
+
+  const heuristicOk = result.ok;
+  const aiSaysOk = interpretation.ok ? interpretation.commandSucceeded : true;
+  const isSuccess = aiSaysOk !== false && (heuristicOk || aiSaysOk === true);
+
+  return {
+    ok: isSuccess,
+    logs,
+    interpretation,
+    permanentFailure: interpretation.permanentFailure === true,
+    failureCategory: interpretation.failureCategory || null
+  };
+};
+
+// ========================================
+// Auto-fix a failed step: ask AI, execute fixes, return whether fixed
+// ========================================
+const autoFixStep = async (tab, prompt, stepDesc, failedCommand, errorLogs, chatHistory, attemptNum, maxAttempts) => {
+  if (tab.abortController?.signal?.aborted) return { fixed: false, aborted: true };
+
+  addChatMessage(tab, "assistant", `Consulting AI for auto-fix (attempt ${attemptNum}/${maxAttempts})...`, { isThinking: true });
+
+  const fix = await sshApi.aiFixCommand({
+    prompt: `${prompt} — specifically step: ${stepDesc}`,
+    logs: errorLogs,
+    chatHistory,
+    failedCommands: [failedCommand],
+    envInfo: tab.envInfo || null,
+    settings: state.settings
+  });
+
+  if (tab.abortController?.signal?.aborted) {
+    removeThinkingMessage(tab);
+    return { fixed: false, aborted: true };
+  }
+
+  removeThinkingMessage(tab);
+
+  if (!fix.ok) {
+    addChatMessage(tab, "assistant", fix.error || "Could not generate a fix.");
+    return { fixed: false };
+  }
+
+  // AI says abort — permanent failure
+  if (fix.responseType === "abort") {
+    addChatMessage(tab, "impossible", fix.reason, { suggestion: fix.suggestion });
+    return { fixed: false, permanent: true };
+  }
+
+  // AI returned a fix plan — execute each fix step
+  if (fix.responseType === "plan") {
+    if (fix.explanation) {
+      addChatMessage(tab, "assistant", fix.explanation);
+    }
+    const fixSteps = fix.steps || [];
+    for (const fs of fixSteps) {
+      if (tab.abortController?.signal?.aborted) return { fixed: false, aborted: true };
+
+      addChatMessage(tab, "assistant", `Command: \`${fs.command}\``);
+
+      const fixResult = await executeAndInterpret(
+        tab, fs.command,
+        `Fix step: ${fs.description}`,
+        chatHistory
+      );
+
+      if (fixResult.aborted) return { fixed: false, aborted: true };
+
+      if (fixResult.ok) {
+        if (fixResult.interpretation?.ok && fixResult.interpretation.answer) {
+          addChatMessage(tab, "answer", fixResult.interpretation.answer);
+        }
+      } else {
+        if (fixResult.interpretation?.ok && fixResult.interpretation.answer) {
+          addChatMessage(tab, "answer", fixResult.interpretation.answer);
+        }
+        // Fix step itself failed — don't keep going with fix
+        return { fixed: false };
+      }
+    }
+    return { fixed: true };
+  }
+
+  // AI returned a single fix command
+  if (fix.responseType === "fix" && fix.command) {
+    if (fix.explanation) {
+      addChatMessage(tab, "assistant", fix.explanation);
+    }
+
+    // Don't run the exact same command that failed
+    if (fix.command === failedCommand) {
+      addChatMessage(tab, "assistant", "AI suggested the same command. Skipping duplicate.");
+      return { fixed: false };
+    }
+
+    addChatMessage(tab, "assistant", `Command: \`${fix.command}\``);
+
+    const fixResult = await executeAndInterpret(
+      tab, fix.command,
+      `Fix for: ${stepDesc}`,
+      chatHistory
+    );
+
+    if (fixResult.aborted) return { fixed: false, aborted: true };
+
+    if (fixResult.ok) {
+      if (fixResult.interpretation?.ok && fixResult.interpretation.answer) {
+        addChatMessage(tab, "answer", fixResult.interpretation.answer);
+      }
+      return { fixed: true };
+    } else {
+      if (fixResult.interpretation?.ok && fixResult.interpretation.answer) {
+        addChatMessage(tab, "answer", fixResult.interpretation.answer);
+      }
+      return { fixed: false };
+    }
+  }
+
+  return { fixed: false };
+};
+
+// ========================================
+// Execute Multi-Step Plan (Self-Healing)
 // ========================================
 const executePlan = async (tab, prompt, plan, chatHistory) => {
   const steps = plan.steps || [];
@@ -1446,6 +1600,9 @@ const executePlan = async (tab, prompt, plan, chatHistory) => {
     addChatMessage(tab, "assistant", "The plan has no steps to execute.");
     return;
   }
+
+  // Max auto-fix attempts per step before asking user
+  const maxFixAttempts = Math.min(state.settings.maxRetries, 5);
 
   // Add plan message with step statuses
   const stepsWithStatus = steps.map((s) => ({ ...s, status: "pending" }));
@@ -1462,7 +1619,6 @@ const executePlan = async (tab, prompt, plan, chatHistory) => {
 
   // Execute each step
   for (let i = 0; i < stepsWithStatus.length; i++) {
-    // Check if aborted
     if (tab.abortController?.signal?.aborted) {
       stepsWithStatus[i].status = "failed";
       renderChat(tab);
@@ -1478,99 +1634,163 @@ const executePlan = async (tab, prompt, plan, chatHistory) => {
     const shouldRun = await shouldRunCommand(tab, step.command, "low");
     if (!shouldRun) {
       stepsWithStatus[i].status = "failed";
-      addChatMessage(tab, "assistant", `Step ${i + 1} cancelled by user. Stopping plan execution.`);
+      addChatMessage(tab, "assistant", `Step ${i + 1} cancelled by user. Stopping plan.`);
       renderChat(tab);
       return;
     }
 
     // Execute the step
-    const result = await sshApi.sshExec({
-      tabId: tab.id,
-      command: step.command,
-      password: tab.site?.password || ""
-    });
+    const stepResult = await executeAndInterpret(
+      tab, step.command,
+      `Step ${i + 1} of plan "${plan.title}": ${step.description}`,
+      chatHistory
+    );
 
-    if (tab.abortController?.signal?.aborted) {
+    if (stepResult.aborted) {
       stepsWithStatus[i].status = "failed";
       renderChat(tab);
       return;
     }
 
-    const logs = [result.stdout || "", result.stderr || "", result.error || ""].filter(Boolean).join("\n");
-    tab.logs += `\n$ ${step.command}\n${logs}\n`;
-
-    if (result.timedOut) {
+    if (stepResult.timedOut) {
       stepsWithStatus[i].status = "failed";
-      addChatMessage(tab, "assistant", `Step ${i + 1} timed out. Stopping plan.`);
+      addChatMessage(tab, "assistant", `Step ${i + 1} timed out.`);
       renderChat(tab);
-      return;
+      // Fall through to auto-fix flow
     }
 
-    // Interpret the result
-    const interpretation = await sshApi.aiInterpretOutput({
-      prompt: `Step ${i + 1} of plan "${plan.title}": ${step.description}`,
-      command: step.command,
-      output: result.cleanStdout || result.stdout || "",
-      chatHistory,
-      envInfo: tab.envInfo || null,
-      settings: state.settings
-    });
-
-    const heuristicOk = result.ok;
-    const aiSaysOk = interpretation.ok ? interpretation.commandSucceeded : true;
-    const isSuccess = aiSaysOk !== false && (heuristicOk || aiSaysOk === true);
-
-    if (isSuccess) {
+    if (stepResult.ok) {
+      // Step succeeded
       stepsWithStatus[i].status = "done";
       renderChat(tab);
 
-      if (interpretation.ok && interpretation.answer) {
-        addChatMessage(tab, "answer", `**Step ${i + 1}:** ${interpretation.answer}`);
+      if (stepResult.interpretation?.ok && stepResult.interpretation.answer) {
+        addChatMessage(tab, "answer", `**Step ${i + 1}:** ${stepResult.interpretation.answer}`);
       }
-    } else {
+      continue; // Next step
+    }
+
+    // === STEP FAILED — Start auto-fix loop ===
+
+    // Check for permanent failure first
+    if (stepResult.permanentFailure) {
       stepsWithStatus[i].status = "failed";
       renderChat(tab);
+      addChatMessage(tab, "impossible", stepResult.interpretation?.answer || "This step failed permanently.", {
+        suggestion: stepResult.failureCategory === "os_incompatible"
+          ? "This software requires a different operating system."
+          : null
+      });
+      return;
+    }
 
-      // Check for permanent failure
-      if (interpretation.permanentFailure) {
-        addChatMessage(tab, "impossible", interpretation.answer || "This step failed permanently.", {
-          suggestion: interpretation.failureCategory === "os_incompatible"
-            ? "This software requires a different operating system."
-            : null
-        });
+    if (stepResult.interpretation?.ok && stepResult.interpretation.answer) {
+      addChatMessage(tab, "answer", `**Step ${i + 1} failed:** ${stepResult.interpretation.answer}`);
+    }
+
+    // Auto-fix loop
+    let stepFixed = false;
+    let lastErrorLogs = stepResult.logs || "";
+
+    for (let attempt = 1; attempt <= maxFixAttempts; attempt++) {
+      if (tab.abortController?.signal?.aborted) {
+        stepsWithStatus[i].status = "failed";
+        renderChat(tab);
         return;
       }
 
-      if (interpretation.ok && interpretation.answer) {
-        addChatMessage(tab, "answer", `**Step ${i + 1} failed:** ${interpretation.answer}`);
+      const fixResult = await autoFixStep(
+        tab, prompt, step.description, step.command,
+        lastErrorLogs, chatHistory, attempt, maxFixAttempts
+      );
+
+      if (fixResult.aborted) {
+        stepsWithStatus[i].status = "failed";
+        renderChat(tab);
+        return;
       }
 
-      // Offer to skip or retry
+      if (fixResult.permanent) {
+        stepsWithStatus[i].status = "failed";
+        renderChat(tab);
+        return;
+      }
+
+      if (fixResult.fixed) {
+        // Fix applied — now retry the original step
+        addChatMessage(tab, "assistant", `Fix applied. Retrying step ${i + 1}...`);
+        stepsWithStatus[i].status = "running";
+        renderChat(tab);
+
+        const retryResult = await executeAndInterpret(
+          tab, step.command,
+          `Retry step ${i + 1} of plan "${plan.title}": ${step.description}`,
+          chatHistory
+        );
+
+        if (retryResult.aborted) {
+          stepsWithStatus[i].status = "failed";
+          renderChat(tab);
+          return;
+        }
+
+        if (retryResult.ok) {
+          stepsWithStatus[i].status = "done";
+          renderChat(tab);
+          if (retryResult.interpretation?.ok && retryResult.interpretation.answer) {
+            addChatMessage(tab, "answer", `**Step ${i + 1} (after fix):** ${retryResult.interpretation.answer}`);
+          }
+          stepFixed = true;
+          break; // Step fixed, move to next step
+        } else {
+          // Retry still failed — update error logs for next fix attempt
+          lastErrorLogs = retryResult.logs || "";
+          if (retryResult.interpretation?.ok && retryResult.interpretation.answer) {
+            addChatMessage(tab, "answer", `**Step ${i + 1} still failing:** ${retryResult.interpretation.answer}`);
+          }
+
+          if (retryResult.permanentFailure) {
+            stepsWithStatus[i].status = "failed";
+            renderChat(tab);
+            addChatMessage(tab, "impossible", retryResult.interpretation?.answer || "This step cannot be fixed.", {
+              suggestion: null
+            });
+            return;
+          }
+        }
+      } else {
+        // Fix itself failed — try another fix on next iteration
+        // lastErrorLogs stays the same
+      }
+    }
+
+    // If auto-fix exhausted, offer manual options
+    if (!stepFixed) {
+      stepsWithStatus[i].status = "failed";
+      renderChat(tab);
+
       const remainingSteps = stepsWithStatus.length - i - 1;
       if (remainingSteps > 0) {
         const action = await showPlanFailureOptions(tab, i + 1, stepsWithStatus.length);
         if (action === "skip") {
-          stepsWithStatus[i].status = "failed";
-          renderChat(tab);
           continue; // Skip to next step
         } else if (action === "retry") {
           stepsWithStatus[i].status = "pending";
-          i--; // Will be incremented by the loop, effectively retrying
+          i--; // Will be incremented by the loop
           renderChat(tab);
           continue;
         } else {
-          // "stop" — user chose to stop
-          addChatMessage(tab, "assistant", `Plan execution stopped at step ${i + 1}.`);
+          addChatMessage(tab, "assistant", `Plan stopped at step ${i + 1}.`);
           return;
         }
       } else {
-        addChatMessage(tab, "assistant", `Plan failed on the last step (${i + 1}/${stepsWithStatus.length}).`);
+        addChatMessage(tab, "assistant", `Plan failed on the last step (${i + 1}/${stepsWithStatus.length}) after ${maxFixAttempts} auto-fix attempts.`);
         return;
       }
     }
   }
 
-  // All steps completed (some may have been skipped)
+  // All steps completed
   const doneCount = stepsWithStatus.filter((s) => s.status === "done").length;
   const failedCount = stepsWithStatus.filter((s) => s.status === "failed").length;
   if (failedCount > 0) {
