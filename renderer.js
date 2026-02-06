@@ -884,6 +884,7 @@ const renderActiveTab = () => {
       fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
       lineHeight: 1.4,
+      scrollback: 50000,
       theme: {
         background: isDark ? "#0a0e14" : "#f8fafc",
         foreground: isDark ? "#e7ecf2" : "#0f172a",
