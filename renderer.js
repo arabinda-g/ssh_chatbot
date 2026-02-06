@@ -1451,6 +1451,12 @@ const executeAndInterpret = async (tab, command, contextPrompt, chatHistory) => 
     return { aborted: true };
   }
 
+  // Detect SSH disconnection — don't send to AI, just report it
+  const errorStr = (result.error || "").toLowerCase();
+  if (!result.ok && (errorStr.includes("not connected") || errorStr.includes("shell not ready") || errorStr.includes("shell closed"))) {
+    return { ok: false, disconnected: true, logs: result.error || "SSH connection lost" };
+  }
+
   const logs = [result.stdout || "", result.stderr || "", result.error || ""].filter(Boolean).join("\n");
   tab.logs += `\n$ ${command}\n${logs}\n`;
 
@@ -1482,6 +1488,91 @@ const executeAndInterpret = async (tab, command, contextPrompt, chatHistory) => 
     permanentFailure: interpretation.permanentFailure === true,
     failureCategory: interpretation.failureCategory || null
   };
+};
+
+// ========================================
+// Reconnect SSH with retry + exponential backoff (for reboot scenarios)
+// ========================================
+const reconnectSSH = async (tab, maxRetries = 10, initialDelayMs = 5000) => {
+  if (!tab.site) return false;
+
+  let delay = initialDelayMs;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (tab.abortController?.signal?.aborted) return false;
+
+    addChatMessage(tab, "assistant", `Reconnecting... attempt ${attempt}/${maxRetries} (waiting ${Math.round(delay / 1000)}s)`, { isThinking: true });
+
+    // Wait before trying
+    await new Promise((r) => setTimeout(r, delay));
+    removeThinkingMessage(tab);
+
+    if (tab.abortController?.signal?.aborted) return false;
+
+    // First disconnect cleanly to reset state
+    try { await sshApi.sshDisconnect({ tabId: tab.id }); } catch (_) { /* ignore */ }
+
+    // Try to connect
+    const res = await sshApi.sshConnect({ tabId: tab.id, config: tab.site });
+    if (res.ok) {
+      // Wait a moment for shell to be ready
+      await new Promise((r) => setTimeout(r, 2000));
+      addChatMessage(tab, "assistant", "Reconnected successfully!");
+      showToast("success", "Reconnected", `Re-established SSH connection to ${tab.title}`);
+      // Re-detect environment after reconnect
+      try { await detectEnvironment(tab); } catch (_) { /* ignore */ }
+      return true;
+    }
+
+    // Increase delay with exponential backoff, cap at 30s
+    delay = Math.min(delay * 1.5, 30000);
+  }
+
+  return false;
+};
+
+// ========================================
+// Show reconnect prompt (fallback when auto-reconnect fails)
+// ========================================
+const showReconnectPrompt = (tab, stepNum, totalSteps) => {
+  return new Promise((resolve) => {
+    const chatEl = document.getElementById(`chat-${tab.id}`);
+    if (!chatEl) return resolve("stop");
+
+    const el = document.createElement("div");
+    el.className = "plan-failure-options";
+    el.innerHTML = `
+      <div class="plan-failure-header" style="color: var(--warning-color, #f59e0b);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>
+        </svg>
+        SSH connection lost (step ${stepNum}/${totalSteps}). Auto-reconnect failed.
+      </div>
+      <div class="plan-failure-actions">
+        <button class="plan-action-btn retry" data-action="reconnect">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          Retry Reconnect
+        </button>
+        <button class="plan-action-btn stop" data-action="stop">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+          </svg>
+          Stop Plan
+        </button>
+      </div>
+    `;
+
+    chatEl.appendChild(el);
+    chatEl.scrollTop = chatEl.scrollHeight;
+
+    el.querySelectorAll(".plan-action-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        el.remove();
+        resolve(btn.dataset.action);
+      });
+    });
+  });
 };
 
 // ========================================
@@ -1650,6 +1741,53 @@ const executePlan = async (tab, prompt, plan, chatHistory) => {
       stepsWithStatus[i].status = "failed";
       renderChat(tab);
       return;
+    }
+
+    // === SSH DISCONNECTED — Auto-reconnect and resume ===
+    if (stepResult.disconnected) {
+      // Check if this step itself was a reboot/restart command
+      const cmdLower = step.command.toLowerCase();
+      const isRebootCmd = /\breboot\b|\bshutdown\b.*-r|\binit\s+6\b|\bsystemctl\s+reboot\b/.test(cmdLower);
+
+      if (isRebootCmd) {
+        // The step was a reboot — mark as done, reconnect, then continue to next step
+        stepsWithStatus[i].status = "done";
+        renderChat(tab);
+        addChatMessage(tab, "answer", `**Step ${i + 1}:** Reboot command executed. Server is restarting...`);
+      } else {
+        stepsWithStatus[i].status = "failed";
+        renderChat(tab);
+        addChatMessage(tab, "assistant", `Step ${i + 1}: SSH connection lost.`);
+      }
+
+      // Auto-reconnect loop with fallback to manual prompt
+      let reconnected = false;
+      while (!reconnected) {
+        if (tab.abortController?.signal?.aborted) return;
+
+        addChatMessage(tab, "assistant", "Server connection lost. Attempting to reconnect...");
+        reconnected = await reconnectSSH(tab, 10, isRebootCmd ? 10000 : 5000);
+
+        if (reconnected) {
+          if (!isRebootCmd) {
+            // Retry the failed step after reconnect
+            addChatMessage(tab, "assistant", `Retrying step ${i + 1} after reconnect...`);
+            i--; // Will be incremented by loop, effectively retrying
+          }
+          break;
+        } else {
+          // Auto-reconnect failed — ask user
+          addChatMessage(tab, "assistant", "Auto-reconnect failed after multiple attempts.");
+          const action = await showReconnectPrompt(tab, i + 1, stepsWithStatus.length);
+          if (action === "reconnect") {
+            continue; // Try reconnect loop again
+          } else {
+            addChatMessage(tab, "assistant", `Plan stopped at step ${i + 1} — connection lost.`);
+            return;
+          }
+        }
+      }
+      continue; // Move to next step (or retry current)
     }
 
     if (stepResult.timedOut) {
@@ -1834,6 +1972,21 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = [], ris
     });
 
     if (tab.abortController?.signal?.aborted) return;
+
+    // Detect SSH disconnection for single commands
+    const errorStr = (result.error || "").toLowerCase();
+    if (!result.ok && (errorStr.includes("not connected") || errorStr.includes("shell not ready") || errorStr.includes("shell closed"))) {
+      addChatMessage(tab, "assistant", "SSH connection lost. Attempting to reconnect...");
+      const reconnected = await reconnectSSH(tab, 10, 5000);
+      if (reconnected) {
+        addChatMessage(tab, "assistant", "Reconnected. Retrying command...");
+        continue; // Retry the same command
+      } else {
+        addChatMessage(tab, "assistant", "Could not reconnect to the server. Please reconnect manually and try again.");
+        showToast("error", "Connection Lost", "SSH connection could not be re-established");
+        return;
+      }
+    }
 
     const logs = [result.stdout || "", result.stderr || "", result.error || ""].filter(Boolean).join("\n");
     tab.logs += `\n$ ${current}\n${logs}\n`;

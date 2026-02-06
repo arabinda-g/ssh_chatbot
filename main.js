@@ -147,8 +147,16 @@ const createShell = (conn, tabId, event) => {
 };
 
 ipcMain.handle("ssh-connect", async (event, { tabId, config }) => {
-  if (connections.has(tabId)) {
+  // Check if we already have a healthy connection
+  const existing = connections.get(tabId);
+  if (existing?.conn && existing?.shell) {
     return { ok: true };
+  }
+
+  // Clean up stale/dead connection entry before reconnecting
+  if (existing) {
+    try { existing.conn?.end(); } catch (_) { /* ignore */ }
+    connections.delete(tabId);
   }
 
   return await new Promise((resolve) => {
