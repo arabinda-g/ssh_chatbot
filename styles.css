@@ -1055,6 +1055,95 @@ body.light-theme .terminal-body .xterm-viewport {
 }
 
 /* ========================================
+   Plan Failure Options
+   ======================================== */
+.plan-failure-options {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  margin-top: 8px;
+  animation: confirmSlide 0.25s ease;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+}
+
+.plan-failure-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warning);
+  margin-bottom: 12px;
+}
+
+.plan-failure-header svg {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+.plan-failure-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.plan-action-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+}
+
+.plan-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.plan-action-btn.retry {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.plan-action-btn.retry:hover {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.plan-action-btn.skip {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.plan-action-btn.skip:hover {
+  background: var(--warning);
+  color: white;
+}
+
+.plan-action-btn.stop {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.plan-action-btn.stop:hover {
+  background: var(--error);
+  color: white;
+}
+
+/* ========================================
    High Risk Confirmation
    ======================================== */
 .chat-confirm.high-risk {

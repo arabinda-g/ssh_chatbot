@@ -602,11 +602,14 @@ You MUST respond with ONLY a JSON object (no markdown wrapping, no backticks aro
 1. ALWAYS use non-interactive flags: -y for apt/yum, --noconfirm for pacman, DEBIAN_FRONTEND=noninteractive
 2. For config file edits, use sed/awk/tee. NEVER suggest vi/vim/nano/emacs
 3. Chain related commands with && (stop on failure) or ; (continue regardless)
-4. When root privileges are needed, prefix with sudo
+4. When root privileges are needed, prefix with sudo (WITHOUT the -n flag)
 5. After modifying service configs, include service reload/restart
 6. For installations, update package lists first if needed
 7. Prefer modern tools: systemctl over service, ip over ifconfig
 8. For potentially destructive operations, add safety checks
+9. **NEVER use "sudo -n"** — the terminal client handles sudo password prompts automatically, so always use plain "sudo" without -n. Using -n will cause unnecessary failures.
+10. For plan steps, make each step self-contained and independently executable. Don't include verification/pre-check steps that test for conditions the system already handles (like sudo access).
+11. Keep plan steps focused on the actual work: install, configure, restart, verify results. Skip unnecessary pre-flight tests.
 ${envSection}
 ## CONTEXT UNDERSTANDING:
 - Short follow-up messages (1-5 words) ALWAYS relate to the previous conversation topic
@@ -775,8 +778,11 @@ You MUST respond with ONLY a JSON object (no markdown wrapping). Use one of thes
 5. Confidence "low" means you're not sure the fix will work — be honest
 6. Always use non-interactive flags (-y, --yes, --noconfirm, DEBIAN_FRONTEND=noninteractive)
 7. For config edits, use sed/awk/tee, never interactive editors
+8. NEVER use "sudo -n" — the terminal handles sudo password prompts automatically. Always use plain "sudo".
+9. If a "sudo: a password is required" error appears, it means "sudo -n" was used. Fix by removing the -n flag.
 
 ## FIX STRATEGIES (in order of preference):
+- "sudo: a password is required" → remove the -n flag from sudo, use plain sudo instead
 - Missing package → install it first
 - Permission denied → add sudo, fix permissions
 - File not found → create parent dirs, check correct path

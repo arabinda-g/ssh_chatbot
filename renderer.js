@@ -1380,6 +1380,57 @@ const handleChatSend = async (tab) => {
 };
 
 // ========================================
+// Plan Step Failure Options (Skip / Retry / Stop)
+// ========================================
+const showPlanFailureOptions = (tab, stepNum, totalSteps) => {
+  return new Promise((resolve) => {
+    const chatEl = document.getElementById(`chat-${tab.id}`);
+    if (!chatEl) return resolve("stop");
+
+    const optionsEl = document.createElement("div");
+    optionsEl.className = "plan-failure-options";
+    optionsEl.innerHTML = `
+      <div class="plan-failure-header">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        Step ${stepNum} of ${totalSteps} failed. What would you like to do?
+      </div>
+      <div class="plan-failure-actions">
+        <button class="plan-action-btn retry" data-action="retry">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          Retry Step
+        </button>
+        <button class="plan-action-btn skip" data-action="skip">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+          </svg>
+          Skip & Continue
+        </button>
+        <button class="plan-action-btn stop" data-action="stop">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+          </svg>
+          Stop Plan
+        </button>
+      </div>
+    `;
+
+    chatEl.appendChild(optionsEl);
+    chatEl.scrollTop = chatEl.scrollHeight;
+
+    optionsEl.querySelectorAll(".plan-action-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        optionsEl.remove();
+        resolve(btn.dataset.action);
+      });
+    });
+  });
+};
+
+// ========================================
 // Execute Multi-Step Plan
 // ========================================
 const executePlan = async (tab, prompt, plan, chatHistory) => {
@@ -1487,14 +1538,41 @@ const executePlan = async (tab, prompt, plan, chatHistory) => {
         addChatMessage(tab, "answer", `**Step ${i + 1} failed:** ${interpretation.answer}`);
       }
 
-      addChatMessage(tab, "assistant", `Plan execution stopped at step ${i + 1}. You can try to fix this step manually and continue.`);
-      return;
+      // Offer to skip or retry
+      const remainingSteps = stepsWithStatus.length - i - 1;
+      if (remainingSteps > 0) {
+        const action = await showPlanFailureOptions(tab, i + 1, stepsWithStatus.length);
+        if (action === "skip") {
+          stepsWithStatus[i].status = "failed";
+          renderChat(tab);
+          continue; // Skip to next step
+        } else if (action === "retry") {
+          stepsWithStatus[i].status = "pending";
+          i--; // Will be incremented by the loop, effectively retrying
+          renderChat(tab);
+          continue;
+        } else {
+          // "stop" — user chose to stop
+          addChatMessage(tab, "assistant", `Plan execution stopped at step ${i + 1}.`);
+          return;
+        }
+      } else {
+        addChatMessage(tab, "assistant", `Plan failed on the last step (${i + 1}/${stepsWithStatus.length}).`);
+        return;
+      }
     }
   }
 
-  // All steps completed
-  addChatMessage(tab, "assistant", "All plan steps completed successfully!");
-  showToast("success", "Plan Complete", `All ${stepsWithStatus.length} steps finished`);
+  // All steps completed (some may have been skipped)
+  const doneCount = stepsWithStatus.filter((s) => s.status === "done").length;
+  const failedCount = stepsWithStatus.filter((s) => s.status === "failed").length;
+  if (failedCount > 0) {
+    addChatMessage(tab, "assistant", `Plan finished: ${doneCount}/${stepsWithStatus.length} steps succeeded, ${failedCount} skipped/failed.`);
+    showToast("info", "Plan Finished", `${doneCount} steps succeeded, ${failedCount} had issues`);
+  } else {
+    addChatMessage(tab, "assistant", "All plan steps completed successfully!");
+    showToast("success", "Plan Complete", `All ${stepsWithStatus.length} steps finished`);
+  }
 };
 
 // ========================================
