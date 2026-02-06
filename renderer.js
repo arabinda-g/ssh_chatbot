@@ -43,6 +43,7 @@ const sshApi = window.api || {
   aiGetCommand: async () => ({ ok: false, error: "Not available in browser" }),
   aiFixCommand: async () => ({ ok: false, error: "Not available in browser" }),
   aiInterpretOutput: async () => ({ ok: false, error: "Not available in browser" }),
+  aiGenerateTitle: async () => ({ ok: false, error: "Not available in browser" }),
   onSshData: () => {},
   onSshError: () => {},
   onSshStatus: () => {}
@@ -198,6 +199,46 @@ const saveCurrentSession = (tab) => {
   }
 };
 
+// Remember the last active session for each site
+const saveLastActiveSession = (siteId, sessionId) => {
+  if (!siteId || !sessionId) return;
+  const data = JSON.parse(localStorage.getItem("last_active_sessions") || "{}");
+  data[siteId] = sessionId;
+  localStorage.setItem("last_active_sessions", JSON.stringify(data));
+};
+
+const getLastActiveSession = (siteId) => {
+  if (!siteId) return null;
+  const data = JSON.parse(localStorage.getItem("last_active_sessions") || "{}");
+  return data[siteId] || null;
+};
+
+// Generate a title for a session based on the first user message
+const generateSessionTitle = async (tab, prompt) => {
+  if (!tab.site?.id || !tab.activeSessionId) return;
+
+  const session = tab.sessions?.find((s) => s.id === tab.activeSessionId);
+  if (!session) return;
+
+  // Only generate title if session still has the default "Chat N" name
+  if (!/^Chat \d+$/.test(session.name)) return;
+
+  try {
+    const result = await sshApi.aiGenerateTitle({
+      prompt,
+      settings: state.settings
+    });
+
+    if (result.ok && result.title) {
+      session.name = result.title;
+      saveChatSessions(tab.site.id, tab.sessions);
+      updateSessionBar(tab);
+    }
+  } catch {
+    // Silently fail — title generation is non-critical
+  }
+};
+
 const switchSession = (tab, sessionId) => {
   // Save current session first
   saveCurrentSession(tab);
@@ -206,6 +247,11 @@ const switchSession = (tab, sessionId) => {
   tab.activeSessionId = sessionId;
   const session = tab.sessions.find((s) => s.id === sessionId);
   tab.chat = session ? [...session.messages] : [];
+
+  // Remember this as the last active session for the site
+  if (tab.site?.id) {
+    saveLastActiveSession(tab.site.id, sessionId);
+  }
 
   renderChat(tab);
   updateSessionBar(tab);
@@ -442,13 +488,24 @@ const createTab = async (site) => {
   let activeSessionId = null;
 
   if (site && sessions.length > 0) {
-    // Sort by most recent and select the latest
-    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-    activeSessionId = sessions[0].id;
+    // Try to restore last active session for this site
+    const lastActiveId = getLastActiveSession(site.id);
+    if (lastActiveId && sessions.find((s) => s.id === lastActiveId)) {
+      activeSessionId = lastActiveId;
+    } else {
+      // Fall back to most recent
+      sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+      activeSessionId = sessions[0].id;
+    }
   } else if (site) {
     // Create default first session
     const firstSession = createNewSession(site.id, sessions);
     activeSessionId = firstSession.id;
+  }
+
+  // Save the active session as the last active for this site
+  if (site && activeSessionId) {
+    saveLastActiveSession(site.id, activeSessionId);
   }
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -720,6 +777,9 @@ const renderActiveTab = () => {
     const newSession = createNewSession(tab.site.id, tab.sessions);
     tab.activeSessionId = newSession.id;
     tab.chat = [];
+
+    // Remember as last active
+    saveLastActiveSession(tab.site.id, newSession.id);
 
     renderChat(tab);
     updateSessionBar(tab);
@@ -1037,12 +1097,20 @@ const handleChatSend = async (tab) => {
   }
   
   input.value = "";
-  
+
+  // Check if this is the first user message (for title generation)
+  const isFirstMessage = !tab.chat.some((m) => m.role === "user" && !m.isThinking);
+
   // Build chat history before adding the new message
   const chatHistory = buildChatHistory(tab);
   
   addChatMessage(tab, "user", prompt);
   addChatMessage(tab, "assistant", "", true); // Thinking indicator
+
+  // Generate session title on first message (fire and forget)
+  if (isFirstMessage) {
+    generateSessionTitle(tab, prompt);
+  }
 
   const response = await sshApi.aiGetCommand({
     prompt,

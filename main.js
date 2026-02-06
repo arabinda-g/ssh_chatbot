@@ -771,3 +771,46 @@ RULES FOR "answer" field:
     }
   }
 );
+
+// ========================================
+// AI Session Title Generation
+// ========================================
+ipcMain.handle(
+  "ai-generate-title",
+  async (_event, { prompt, settings }) => {
+    if (!settings?.apiKey) {
+      return { ok: false, error: "Missing API key" };
+    }
+
+    const messages = [
+      {
+        role: "system",
+        content: "Generate a short, descriptive title (3-6 words max) for a chat session based on the user's first message. The chat is about server management via SSH. Respond with ONLY the title text, nothing else. No quotes, no punctuation at the end, no prefixes. Examples: Install Nginx Web Server, Check Disk Usage, Configure SSH Security, Deploy Node App, Database Backup Setup"
+      },
+      {
+        role: "user",
+        content: prompt
+      }
+    ];
+
+    const result = await callOpenAI({
+      apiKey: settings.apiKey,
+      model: settings.model || "gpt-5.2",
+      messages,
+      maxRetries: 1
+    });
+
+    if (!result.ok) {
+      return result;
+    }
+
+    // Clean up the title
+    let title = result.text.trim().replace(/^["']|["']$/g, "").replace(/\.$/, "");
+    // Ensure reasonable length
+    if (title.length > 40) {
+      title = title.slice(0, 40).trim();
+    }
+
+    return { ok: true, title };
+  }
+);
