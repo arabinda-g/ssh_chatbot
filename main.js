@@ -266,6 +266,8 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
       restart: /(?:restart|reload).*(?:service|daemon).*\?/im,
       dpkg: /What would you like to do about it|keep the local version|install the package maintainer/im,
       passphrase: /Enter passphrase|Enter new password|New password:|Retype new password:/im,
+      // Git/HTTP auth prompts, login prompts — these can't be auto-answered
+      authPrompt: /Username for ['"]https?:\/\/|Password for ['"]https?:\/\/|Token for ['"]https?:\/\/|Enter your .*(username|credentials|token|API key)/im,
     };
 
     // Smart error detection
@@ -371,6 +373,26 @@ ipcMain.handle("ssh-exec", async (event, { tabId, command, password }) => {
             entry.shell.write("y\n");
           }, 100);
           interactiveResponses++;
+          return;
+        }
+
+        // Handle auth prompts (git username/password, API tokens) — abort and report
+        if (interactivePatterns.authPrompt.test(recentOutput) && !resolved) {
+          resolved = true;
+          // Send Ctrl+C to cancel the hanging command
+          entry.shell.write("\x03");
+          setTimeout(() => {
+            entry.shell.removeListener("data", dataHandler);
+            const cleanOutput = stripAnsi(output);
+            resolve({
+              ok: false,
+              code: 1,
+              stdout: output,
+              cleanStdout: cleanOutput,
+              stderr: "",
+              error: "Command requires authentication credentials (username/password/token) which cannot be provided automatically. The command was cancelled."
+            });
+          }, 500);
           return;
         }
 
