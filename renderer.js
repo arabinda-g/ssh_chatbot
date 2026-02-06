@@ -40,6 +40,7 @@ const sshApi = window.api || {
   sshWrite: async () => ({ ok: true }),
   sshExec: async () => ({ ok: false, error: "Not available in browser" }),
   sshExecSilent: async () => ({ ok: false, error: "Not available in browser" }),
+  sshInterrupt: async () => ({ ok: true }),
   aiGetCommand: async () => ({ ok: false, error: "Not available in browser" }),
   aiFixCommand: async () => ({ ok: false, error: "Not available in browser" }),
   aiInterpretOutput: async () => ({ ok: false, error: "Not available in browser" }),
@@ -813,12 +814,18 @@ const renderActiveTab = () => {
 // ========================================
 // Stop Execution
 // ========================================
-const stopExecution = (tab) => {
+const stopExecution = async (tab) => {
+  // Send Ctrl+C to interrupt any running command in the shell
+  if (tab.id) {
+    await sshApi.sshInterrupt({ tabId: tab.id });
+  }
+
   if (tab.abortController) {
     tab.abortController.abort();
     tab.abortController = null;
   }
   tab.isExecuting = false;
+  removeThinkingMessage(tab);
   addChatMessage(tab, "assistant", "Execution stopped by user.");
   showToast("info", "Stopped", "Command execution was stopped");
   updateSendButton(tab);
@@ -1709,6 +1716,15 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = [], ris
         ? "Incompatible operating system" 
         : "This issue cannot be resolved automatically");
       return;
+    }
+
+    // If the fix suggests a plan instead of a single command, switch to plan execution
+    if (fix.responseType === "plan") {
+      if (fix.explanation) {
+        addChatMessage(tab, "assistant", fix.explanation);
+      }
+      await executePlan(tab, prompt, fix, chatHistory);
+      return; // Plan execution handles everything from here
     }
 
     // Get the fixed command

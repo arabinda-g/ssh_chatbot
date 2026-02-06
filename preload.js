@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("api", {
   sshWrite: (payload) => ipcRenderer.invoke("ssh-write", payload),
   sshExec: (payload) => ipcRenderer.invoke("ssh-exec", payload),
   sshExecSilent: (payload) => ipcRenderer.invoke("ssh-exec-silent", payload),
+  sshInterrupt: (payload) => ipcRenderer.invoke("ssh-interrupt", payload),
   aiGetCommand: (payload) => ipcRenderer.invoke("ai-get-command", payload),
   aiFixCommand: (payload) => ipcRenderer.invoke("ai-fix-command", payload),
   aiInterpretOutput: (payload) => ipcRenderer.invoke("ai-interpret-output", payload),

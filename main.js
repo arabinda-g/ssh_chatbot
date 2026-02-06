@@ -200,6 +200,15 @@ ipcMain.handle("ssh-write", async (_event, { tabId, data }) => {
   return { ok: true };
 });
 
+// Send Ctrl+C (SIGINT) to interrupt a running command
+ipcMain.handle("ssh-interrupt", async (_event, { tabId }) => {
+  const entry = connections.get(tabId);
+  if (entry?.shell) {
+    entry.shell.write("\x03"); // Ctrl+C
+  }
+  return { ok: true };
+});
+
 // ========================================
 // Smart Command Execution (Interactive Shell)
 // ========================================
@@ -546,20 +555,37 @@ ipcMain.handle(
 ## YOUR RESPONSE FORMAT
 You MUST respond with ONLY a JSON object (no markdown wrapping, no backticks around the JSON). Use one of these response types:
 
-### Type 1: "command" - When you can fulfill the request with shell commands
-{"type":"command","command":"the shell command(s) here","explanation":"brief 1-sentence explanation of what this will do","risk":"low|medium|high","estimatedTime":"fast|moderate|slow"}
+### Type 1: "command" - ONLY for simple, single-purpose operations (ONE short command)
+{"type":"command","command":"single short command here","explanation":"brief 1-sentence explanation","risk":"low|medium|high","estimatedTime":"fast|moderate|slow"}
+IMPORTANT: "command" type is ONLY for simple operations that need ONE command — e.g. "ls -la", "df -h", "systemctl status nginx", "apt-get update -y". If you need more than one command or the command would be longer than ~150 characters, you MUST use "plan" instead.
 
 ### Type 2: "impossible" - When the request CANNOT be fulfilled on this system
 {"type":"impossible","reason":"clear explanation of why this is impossible","suggestion":"alternative approach if any exists, or null"}
 
-### Type 3: "plan" - When the request requires multiple sequential steps that should be tracked
-{"type":"plan","title":"short title for the plan","steps":[{"command":"cmd1","description":"what step 1 does"},{"command":"cmd2","description":"what step 2 does"}],"explanation":"overview of the plan"}
+### Type 3: "plan" - For ANY task requiring multiple commands (THIS IS THE DEFAULT for complex tasks)
+{"type":"plan","title":"short title","steps":[{"command":"cmd1","description":"what step 1 does"},{"command":"cmd2","description":"what step 2 does"}],"explanation":"overview"}
+Each step.command must be a SINGLE, SHORT, self-contained command. NEVER chain multiple operations with && or ; inside a single step.
 
 ### Type 4: "info" - When the user is asking a question that doesn't need a command
 {"type":"info","answer":"your informative answer here"}
 
 ### Type 5: "clarification" - When you need more information to proceed
 {"type":"clarification","question":"what you need to know","options":["option 1","option 2"]}
+
+## ABSOLUTE RULE — COMMAND SIZE LIMIT:
+- A single "command" response must be ONE simple command, under ~150 characters.
+- NEVER chain multiple operations with && or ; into a single "command" response.
+- If the task needs 2+ commands → ALWAYS use "plan" with each command as a separate step.
+- If you are tempted to write "cmd1 && cmd2 && cmd3" → STOP and use "plan" instead.
+- Software installation, server setup, configuration changes → ALWAYS "plan", NEVER "command".
+
+## PLAN STEP RULES:
+- Each step must contain exactly ONE command (no && or ; chaining).
+- Each step must be independently executable and verifiable.
+- Each step command should be short and focused (one action per step).
+- Good step: {"command":"yum -y update","description":"Update system packages"}
+- Bad step: {"command":"yum -y update && yum -y install wget curl perl && cd /tmp && wget ...","description":"..."}
+- Keep steps granular: install packages in one step, configure in another, restart service in another.
 
 ## CRITICAL INTELLIGENCE RULES:
 
@@ -577,16 +603,23 @@ You MUST respond with ONLY a JSON object (no markdown wrapping, no backticks aro
 ### When to Use "impossible":
 - Software explicitly doesn't support the target OS/distro
 - Hardware/architecture mismatch
-- Fundamental technical limitation (e.g., running Docker in Docker without privileged mode)
+- Fundamental technical limitation
 - The operation would break SSH connectivity with no recovery path
-- The user is asking to do something that contradicts physics/logic
 
-### When to Use "plan" (multi-step):
-- Installing complex software stacks (LAMP, LEMP, etc.)
+### When to Use "plan" (STRONGLY PREFERRED for any non-trivial task):
+- ANY software installation (even a single package: update repos step + install step)
+- ANY server setup or configuration
 - System hardening / security setup
 - Setting up services that require config changes + restarts
 - Database migrations or complex backups
-- Any task with 3+ distinct steps that depend on each other
+- Any task with 2+ distinct operations
+- Anything involving download + install + configure
+
+### When to Use "command" (ONLY for truly simple single operations):
+- Checking status: df -h, free -m, systemctl status x, ps aux
+- Single file operations: cat /etc/hosts, ls -la /var/log
+- Simple queries: whoami, uname -a, ip addr
+- A single short apt/yum install of one package (still prefer plan)
 
 ### When to Use "info":
 - User asks "what is...", "how does...", "explain..."
@@ -598,18 +631,12 @@ You MUST respond with ONLY a JSON object (no markdown wrapping, no backticks aro
 - Multiple valid approaches exist and the choice matters
 - Missing critical information (e.g., domain name for SSL setup)
 
-## COMMAND GENERATION RULES (when type is "command" or "plan"):
+## COMMAND RULES (for both "command" and plan step commands):
 1. ALWAYS use non-interactive flags: -y for apt/yum, --noconfirm for pacman, DEBIAN_FRONTEND=noninteractive
 2. For config file edits, use sed/awk/tee. NEVER suggest vi/vim/nano/emacs
-3. Chain related commands with && (stop on failure) or ; (continue regardless)
-4. When root privileges are needed, prefix with sudo (WITHOUT the -n flag)
-5. After modifying service configs, include service reload/restart
-6. For installations, update package lists first if needed
-7. Prefer modern tools: systemctl over service, ip over ifconfig
-8. For potentially destructive operations, add safety checks
-9. **NEVER use "sudo -n"** — the terminal client handles sudo password prompts automatically, so always use plain "sudo" without -n. Using -n will cause unnecessary failures.
-10. For plan steps, make each step self-contained and independently executable. Don't include verification/pre-check steps that test for conditions the system already handles (like sudo access).
-11. Keep plan steps focused on the actual work: install, configure, restart, verify results. Skip unnecessary pre-flight tests.
+3. When root privileges are needed, prefix with sudo (WITHOUT the -n flag)
+4. **NEVER use "sudo -n"** — the terminal handles sudo password prompts automatically. Using -n causes failures.
+5. Prefer modern tools: systemctl over service, ip over ifconfig
 ${envSection}
 ## CONTEXT UNDERSTANDING:
 - Short follow-up messages (1-5 words) ALWAYS relate to the previous conversation topic
@@ -753,10 +780,15 @@ ipcMain.handle(
 
 You MUST respond with ONLY a JSON object (no markdown wrapping). Use one of these response types:
 
-### Type 1: "fix" - You have a different command that should work
-{"type":"fix","command":"the corrected command","explanation":"what was wrong and what this fix does","confidence":"high|medium|low"}
+### Type 1: "fix" - You have a SINGLE, SHORT corrected command that should work
+{"type":"fix","command":"one single short corrected command","explanation":"what was wrong and what this fix does","confidence":"high|medium|low"}
+IMPORTANT: The command must be ONE short command (under ~150 chars). Do NOT chain multiple commands with && or ;.
 
-### Type 2: "abort" - The task is FUNDAMENTALLY IMPOSSIBLE or will never succeed with command changes
+### Type 2: "plan" - The fix requires multiple steps (use this if the original failed because it was too complex)
+{"type":"plan","title":"short title","steps":[{"command":"cmd1","description":"what step 1 does"},{"command":"cmd2","description":"what step 2 does"}],"explanation":"overview of what this plan fixes"}
+Each step must contain exactly ONE short command. NEVER chain with && or ;.
+
+### Type 3: "abort" - The task is FUNDAMENTALLY IMPOSSIBLE or will never succeed
 {"type":"abort","reason":"clear explanation of why this cannot work","rootCause":"category of the problem","suggestion":"alternative approach if any, or null"}
 
 ## ROOT CAUSE CATEGORIES for "abort":
@@ -778,11 +810,13 @@ You MUST respond with ONLY a JSON object (no markdown wrapping). Use one of thes
 5. Confidence "low" means you're not sure the fix will work — be honest
 6. Always use non-interactive flags (-y, --yes, --noconfirm, DEBIAN_FRONTEND=noninteractive)
 7. For config edits, use sed/awk/tee, never interactive editors
-8. NEVER use "sudo -n" — the terminal handles sudo password prompts automatically. Always use plain "sudo".
-9. If a "sudo: a password is required" error appears, it means "sudo -n" was used. Fix by removing the -n flag.
+8. NEVER use "sudo -n" — the terminal handles sudo password prompts automatically.
+9. If the original command was a long chained command (using && or ;), ALWAYS respond with "plan" to break it into individual steps.
+10. Each fix command or plan step must be ONE simple, short command. No chaining.
 
 ## FIX STRATEGIES (in order of preference):
-- "sudo: a password is required" → remove the -n flag from sudo, use plain sudo instead
+- Long chained command failed → break into a "plan" with individual steps
+- "sudo: a password is required" → remove the -n flag from sudo
 - Missing package → install it first
 - Permission denied → add sudo, fix permissions
 - File not found → create parent dirs, check correct path
@@ -833,6 +867,19 @@ ${envSection}`;
           command,
           explanation: parsed.explanation || "",
           confidence: parsed.confidence || "medium"
+        };
+      }
+
+      if (parsed.type === "plan") {
+        return {
+          ok: true,
+          responseType: "plan",
+          title: parsed.title || "Fix Plan",
+          steps: (parsed.steps || []).map((s) => ({
+            command: sanitizeCommand(s.command || ""),
+            description: s.description || ""
+          })),
+          explanation: parsed.explanation || ""
         };
       }
     }
