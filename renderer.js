@@ -39,6 +39,7 @@ const sshApi = window.api || {
   sshDisconnect: async () => ({ ok: true }),
   sshWrite: async () => ({ ok: true }),
   sshExec: async () => ({ ok: false, error: "Not available in browser" }),
+  sshExecSilent: async () => ({ ok: false, error: "Not available in browser" }),
   aiGetCommand: async () => ({ ok: false, error: "Not available in browser" }),
   aiFixCommand: async () => ({ ok: false, error: "Not available in browser" }),
   aiInterpretOutput: async () => ({ ok: false, error: "Not available in browser" }),
@@ -76,7 +77,7 @@ const escapeHtml = (text) => {
   return div.innerHTML;
 };
 
-// Simple markdown parser for answer messages
+// Enhanced markdown parser for answer messages
 const parseSimpleMarkdown = (text) => {
   // First escape HTML
   let result = escapeHtml(text);
@@ -86,8 +87,16 @@ const parseSimpleMarkdown = (text) => {
   result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
   // Convert `code` to <code>code</code>
   result = result.replace(/`(.+?)`/g, "<code>$1</code>");
-  // Convert newlines to <br>
-  result = result.replace(/\n/g, "<br>");
+  // Convert bullet points (- item or * item at start of line)
+  result = result.replace(/^[-*]\s+(.+)$/gm, "<li>$1</li>");
+  // Wrap consecutive <li> in <ul>
+  result = result.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
+  // Convert numbered lists (1. item)
+  result = result.replace(/^\d+\.\s+(.+)$/gm, "<li>$1</li>");
+  // Convert newlines to <br> (but not inside lists)
+  result = result.replace(/\n(?!<)/g, "<br>");
+  // Clean up extra <br> after </ul>
+  result = result.replace(/<\/ul><br>/g, "</ul>");
   return result;
 };
 
@@ -245,6 +254,60 @@ const connectSelectedSite = () => {
 // ========================================
 // Tab Management
 // ========================================
+// ========================================
+// Environment Detection
+// ========================================
+const detectEnvironment = async (tab) => {
+  if (!tab.site) return;
+
+  try {
+    const result = await sshApi.sshExecSilent({
+      tabId: tab.id,
+      command: 'echo "OS:$(uname -srm)" && (cat /etc/os-release 2>/dev/null | grep -E "^(PRETTY_NAME|ID|VERSION_ID)=" | head -3 || echo "DISTRO:Unknown") && echo "SHELL:$SHELL" && echo "USER:$(whoami)" && echo "PKG:$(which apt-get 2>/dev/null && echo apt-get || which yum 2>/dev/null && echo yum || which dnf 2>/dev/null && echo dnf || which pacman 2>/dev/null && echo pacman || which apk 2>/dev/null && echo apk || echo unknown)" && echo "INIT:$(ps -p 1 -o comm= 2>/dev/null || echo unknown)" && echo "ARCH:$(uname -m)"'
+    });
+
+    if (result.ok && result.stdout) {
+      const info = {};
+      const lines = result.stdout.split("\n");
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("OS:")) info.os = trimmed.slice(3).trim();
+        if (trimmed.startsWith("PRETTY_NAME=")) info.distro = trimmed.split("=")[1]?.replace(/"/g, "").trim();
+        if (trimmed.startsWith("ID=")) info.distroId = trimmed.split("=")[1]?.replace(/"/g, "").trim();
+        if (trimmed.startsWith("VERSION_ID=")) info.version = trimmed.split("=")[1]?.replace(/"/g, "").trim();
+        if (trimmed.startsWith("DISTRO:")) info.distro = trimmed.slice(7).trim();
+        if (trimmed.startsWith("SHELL:")) info.shell = trimmed.slice(6).trim();
+        if (trimmed.startsWith("USER:")) info.user = trimmed.slice(5).trim();
+        if (trimmed.startsWith("INIT:")) info.initSystem = trimmed.slice(5).trim();
+        if (trimmed.startsWith("ARCH:")) info.arch = trimmed.slice(5).trim();
+        // Package manager detection - take the last valid line from PKG block
+        if (trimmed.startsWith("PKG:") || trimmed.match(/^\/.*\/(apt-get|yum|dnf|pacman|apk)$/)) {
+          const pkgName = trimmed.replace(/^PKG:/, "").trim();
+          if (pkgName && pkgName !== "unknown") {
+            info.packageManager = pkgName.split("/").pop(); // Extract binary name from path
+          }
+        }
+        if (/^(apt-get|yum|dnf|pacman|apk)$/.test(trimmed)) {
+          info.packageManager = trimmed;
+        }
+      }
+
+      // Determine init system
+      if (info.initSystem === "systemd" || info.initSystem === "init") {
+        info.initSystem = info.initSystem;
+      } else {
+        info.initSystem = "systemd"; // Default assumption for modern Linux
+      }
+
+      tab.envInfo = info;
+    }
+  } catch (e) {
+    // Silently fail - environment detection is optional
+    tab.envInfo = null;
+  }
+};
+
 const createTab = async (site) => {
   const tabId = uid();
   const tab = {
@@ -255,7 +318,9 @@ const createTab = async (site) => {
     statusText: "Disconnected",
     terminal: null,
     logs: "",
-    chat: []
+    chat: [],
+    envInfo: null, // Populated after connection
+    commandHistory: [] // Track commands for retry context
   };
 
   state.tabs.push(tab);
@@ -585,26 +650,29 @@ const shouldRunCommand = (tab, command) => {
   });
 };
 
-// Build chat history for context
+// Build chat history for context - richer and more structured
 const buildChatHistory = (tab) => {
   const history = [];
   for (const msg of tab.chat) {
     if (msg.isThinking) continue;
     if (msg.role === "user") {
-      history.push(`[USER QUESTION]: ${msg.text}`);
+      history.push(`[USER]: ${msg.text}`);
     } else if (msg.role === "answer") {
-      history.push(`[AI ANSWER]: ${msg.text}`);
+      history.push(`[AI INTERPRETATION]: ${msg.text}`);
     } else if (msg.role === "assistant" && msg.text) {
-      // Include commands that were run
       if (msg.text.startsWith("Command:")) {
-        history.push(`[COMMAND RAN]: ${msg.text.replace("Command: ", "").replace(/`/g, "")}`);
+        history.push(`[COMMAND EXECUTED]: ${msg.text.replace("Command: ", "").replace(/`/g, "")}`);
       } else if (msg.text.startsWith("✓")) {
-        history.push(`[RESULT]: Command succeeded`);
+        history.push(`[RESULT]: Success`);
+      } else if (msg.text.includes("failed") || msg.text.includes("error") || msg.text.includes("Error")) {
+        history.push(`[RESULT]: ${msg.text}`);
+      } else if (msg.text.startsWith("Execution cancelled")) {
+        history.push(`[CANCELLED]: User cancelled execution`);
       }
     }
   }
-  // Keep last 15 items for better context
-  return history.slice(-15);
+  // Keep last 20 items for comprehensive context
+  return history.slice(-20);
 };
 
 const handleChatSend = async (tab) => {
@@ -614,6 +682,11 @@ const handleChatSend = async (tab) => {
   
   if (!tab.site) {
     addChatMessage(tab, "assistant", "Please connect to a server first.");
+    return;
+  }
+
+  if (tab.status !== "connected") {
+    addChatMessage(tab, "assistant", "Not connected to server. Please reconnect first.");
     return;
   }
   
@@ -627,8 +700,9 @@ const handleChatSend = async (tab) => {
 
   const response = await sshApi.aiGetCommand({
     prompt,
-    logs: tab.logs.slice(-4000),
+    logs: tab.logs.slice(-8000), // More context for the AI
     chatHistory,
+    envInfo: tab.envInfo || null,
     settings: state.settings
   });
 
@@ -652,6 +726,7 @@ const handleChatSend = async (tab) => {
 const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => {
   let retries = 0;
   let current = command;
+  const failedCommands = []; // Track what we've already tried
 
   while (retries < state.settings.maxRetries) {
     addChatMessage(tab, "assistant", `Command: \`${current}\``);
@@ -662,9 +737,14 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => 
       return;
     }
 
+    // Track command in history
+    if (!tab.commandHistory) tab.commandHistory = [];
+    tab.commandHistory.push(current);
+
     const result = await sshApi.sshExec({
       tabId: tab.id,
-      command: current
+      command: current,
+      password: tab.site?.password || "" // Pass password for sudo handling
     });
 
     const logs = [
@@ -677,21 +757,35 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => 
 
     tab.logs += `\n$ ${current}\n${logs}\n`;
 
-    if (result.ok) {
+    // Handle timeout specially
+    if (result.timedOut) {
+      addChatMessage(tab, "assistant", "Command timed out. It may still be running in the background.");
+      showToast("error", "Timeout", "The command took too long to complete");
+      return;
+    }
+
+    // Use AI to interpret output AND determine success
+    addChatMessage(tab, "assistant", "", true); // Thinking indicator
+
+    const interpretation = await sshApi.aiInterpretOutput({
+      prompt,
+      command: current,
+      output: result.cleanStdout || result.stdout || "",
+      chatHistory,
+      envInfo: tab.envInfo || null,
+      settings: state.settings
+    });
+
+    removeThinkingMessage(tab);
+
+    // Determine success: combine heuristic detection with AI interpretation
+    const heuristicOk = result.ok;
+    const aiSaysOk = interpretation.ok ? interpretation.commandSucceeded : true;
+    // Trust AI interpretation primarily, but also consider heuristic
+    const isSuccess = aiSaysOk !== false && (heuristicOk || aiSaysOk === true);
+
+    if (isSuccess) {
       addChatMessage(tab, "assistant", "✓ Command completed successfully.");
-      
-      // Interpret the output with AI
-      addChatMessage(tab, "assistant", "", true); // Thinking indicator
-      
-      const interpretation = await sshApi.aiInterpretOutput({
-        prompt,
-        command: current,
-        output: result.stdout || "",
-        chatHistory,
-        settings: state.settings
-      });
-      
-      removeThinkingMessage(tab);
       
       if (interpretation.ok && interpretation.answer) {
         addChatMessage(tab, "answer", interpretation.answer);
@@ -701,26 +795,42 @@ const runCommandWithRetries = async (tab, prompt, command, chatHistory = []) => 
       return;
     }
 
+    // Command failed
+    failedCommands.push(current);
     retries += 1;
+
+    if (interpretation.ok && interpretation.answer) {
+      addChatMessage(tab, "answer", interpretation.answer);
+    }
+
     if (retries >= state.settings.maxRetries) {
-      addChatMessage(tab, "assistant", "Maximum retries reached. Please try manually.");
+      addChatMessage(tab, "assistant", "Maximum retries reached. Please try manually or rephrase your request.");
       showToast("error", "Max Retries", "The command failed after multiple attempts");
       return;
     }
 
-    addChatMessage(tab, "assistant", "Command failed. Attempting to fix...");
+    addChatMessage(tab, "assistant", `Attempt ${retries}/${state.settings.maxRetries} failed. Generating a fix...`);
     addChatMessage(tab, "assistant", "", true); // Thinking indicator
 
     const fix = await sshApi.aiFixCommand({
       prompt,
       logs: logs || "Unknown error",
+      chatHistory,
+      failedCommands,
+      envInfo: tab.envInfo || null,
       settings: state.settings
     });
 
     removeThinkingMessage(tab);
 
     if (!fix.ok || !fix.command) {
-      addChatMessage(tab, "assistant", fix.error || "Could not generate a fix.");
+      addChatMessage(tab, "assistant", fix.error || "Could not generate a fix. Please try manually.");
+      return;
+    }
+
+    // Check if the AI returned the same command we already tried
+    if (failedCommands.includes(fix.command)) {
+      addChatMessage(tab, "assistant", "AI suggested the same command that already failed. Stopping to prevent infinite loop.");
       return;
     }
 
@@ -738,8 +848,9 @@ sshApi.onSshData(({ tabId, data }) => {
   }
   if (tab) {
     tab.logs += data;
-    if (tab.logs.length > 12000) {
-      tab.logs = tab.logs.slice(-12000);
+    // Larger log buffer for better AI context
+    if (tab.logs.length > 24000) {
+      tab.logs = tab.logs.slice(-24000);
     }
   }
 });
@@ -751,6 +862,11 @@ sshApi.onSshStatus(({ tabId, status }) => {
     if (statusLower.includes("connected") && !statusLower.includes("dis")) {
       tab.status = "connected";
       showToast("success", "Connected", `Connected to ${tab.title}`);
+
+      // Auto-detect environment after connection (with a small delay for shell to be ready)
+      if (!tab.envInfo) {
+        setTimeout(() => detectEnvironment(tab), 1500);
+      }
     } else if (statusLower.includes("connecting")) {
       tab.status = "connecting";
     } else {
