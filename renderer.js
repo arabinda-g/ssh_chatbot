@@ -152,6 +152,132 @@ const saveSettings = () => {
 };
 
 // ========================================
+// Chat Session Storage (per-site persistence)
+// ========================================
+const loadChatSessions = (siteId) => {
+  if (!siteId) return [];
+  const raw = localStorage.getItem(`chat_sessions_${siteId}`);
+  return raw ? JSON.parse(raw) : [];
+};
+
+const saveChatSessions = (siteId, sessions) => {
+  if (!siteId) return;
+  localStorage.setItem(`chat_sessions_${siteId}`, JSON.stringify(sessions));
+};
+
+const createNewSession = (siteId, sessions) => {
+  // Find the next number for auto-naming
+  const existingNums = sessions
+    .map((s) => {
+      const match = s.name.match(/^Chat (\d+)$/);
+      return match ? parseInt(match[1]) : 0;
+    })
+    .filter(Boolean);
+  const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+
+  const session = {
+    id: uid(),
+    name: `Chat ${nextNum}`,
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+
+  sessions.push(session);
+  saveChatSessions(siteId, sessions);
+  return session;
+};
+
+const saveCurrentSession = (tab) => {
+  if (!tab.site?.id || !tab.activeSessionId || !tab.sessions) return;
+  const session = tab.sessions.find((s) => s.id === tab.activeSessionId);
+  if (session) {
+    session.messages = tab.chat.filter((m) => !m.isThinking);
+    session.updatedAt = Date.now();
+    saveChatSessions(tab.site.id, tab.sessions);
+  }
+};
+
+const switchSession = (tab, sessionId) => {
+  // Save current session first
+  saveCurrentSession(tab);
+
+  // Switch to new session
+  tab.activeSessionId = sessionId;
+  const session = tab.sessions.find((s) => s.id === sessionId);
+  tab.chat = session ? [...session.messages] : [];
+
+  renderChat(tab);
+  updateSessionBar(tab);
+};
+
+const deleteSession = (tab, sessionId) => {
+  if (!tab.site?.id || !tab.sessions) return;
+
+  // Don't delete the last session
+  if (tab.sessions.length <= 1) {
+    showToast("info", "Cannot Delete", "You need at least one chat session");
+    return;
+  }
+
+  const sessionName = tab.sessions.find((s) => s.id === sessionId)?.name || "";
+  tab.sessions = tab.sessions.filter((s) => s.id !== sessionId);
+  saveChatSessions(tab.site.id, tab.sessions);
+
+  // If we deleted the active session, switch to the most recent one
+  if (tab.activeSessionId === sessionId) {
+    const latest = tab.sessions.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    tab.activeSessionId = latest.id;
+    tab.chat = [...latest.messages];
+    renderChat(tab);
+  }
+
+  updateSessionBar(tab);
+  showToast("success", "Session Deleted", `"${sessionName}" removed`);
+};
+
+const renameSession = (tab, sessionId, newName) => {
+  if (!tab.site?.id || !tab.sessions) return;
+  const session = tab.sessions.find((s) => s.id === sessionId);
+  if (session && newName.trim()) {
+    session.name = newName.trim();
+    saveChatSessions(tab.site.id, tab.sessions);
+    updateSessionBar(tab);
+  }
+};
+
+const updateSessionBar = (tab) => {
+  const sessionBar = document.getElementById(`session-bar-${tab.id}`);
+  if (!sessionBar) return;
+
+  const activeSession = tab.sessions?.find((s) => s.id === tab.activeSessionId);
+  const nameEl = sessionBar.querySelector(".session-current-name");
+  const countEl = sessionBar.querySelector(".session-count");
+
+  if (nameEl && activeSession) {
+    nameEl.textContent = activeSession.name;
+  }
+  if (countEl && tab.sessions) {
+    countEl.textContent = tab.sessions.length;
+  }
+};
+
+const formatSessionDate = (timestamp) => {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+
+// ========================================
 // Theme Management
 // ========================================
 const applyTheme = () => {
@@ -310,6 +436,23 @@ const detectEnvironment = async (tab) => {
 
 const createTab = async (site) => {
   const tabId = uid();
+
+  // Load saved chat sessions for this site
+  let sessions = site ? loadChatSessions(site.id) : [];
+  let activeSessionId = null;
+
+  if (site && sessions.length > 0) {
+    // Sort by most recent and select the latest
+    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    activeSessionId = sessions[0].id;
+  } else if (site) {
+    // Create default first session
+    const firstSession = createNewSession(site.id, sessions);
+    activeSessionId = firstSession.id;
+  }
+
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+
   const tab = {
     id: tabId,
     title: site ? site.name : `Tab ${state.tabs.length + 1}`,
@@ -318,7 +461,9 @@ const createTab = async (site) => {
     statusText: "Disconnected",
     terminal: null,
     logs: "",
-    chat: [],
+    chat: activeSession ? [...activeSession.messages] : [],
+    sessions,
+    activeSessionId,
     envInfo: null, // Populated after connection
     commandHistory: [] // Track commands for retry context
   };
@@ -336,7 +481,10 @@ const createTab = async (site) => {
 const closeTab = async (tabId) => {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
-  
+
+  // Save chat session before closing
+  saveCurrentSession(tab);
+
   await sshApi.sshDisconnect({ tabId });
   if (tab.terminal) {
     tab.terminal.dispose();
@@ -455,6 +603,23 @@ const renderActiveTab = () => {
           <span class="toggle-label">Ask</span>
         </label>
       </div>
+      <div class="session-bar" id="session-bar-${tab.id}">
+        <button class="session-selector" id="session-selector-${tab.id}" title="Switch chat session">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="session-current-name">${escapeHtml(tab.sessions?.find((s) => s.id === tab.activeSessionId)?.name || "Chat 1")}</span>
+          <span class="session-count">${tab.sessions?.length || 1}</span>
+          <svg class="session-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <button class="session-new-btn" id="session-new-${tab.id}" title="New chat session">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14"/><path d="M5 12h14"/>
+          </svg>
+        </button>
+      </div>
       <div class="chat-messages" id="chat-${tab.id}"></div>
       <div class="chat-input">
         <input id="chat-input-${tab.id}" placeholder="Ask AI to run a command..." />
@@ -534,6 +699,183 @@ const renderActiveTab = () => {
     state.settings.mode = e.target.checked ? "ask" : "auto";
     saveSettings();
   });
+
+  // Session selector event listeners
+  const sessionSelector = document.getElementById(`session-selector-${tab.id}`);
+  const sessionNewBtn = document.getElementById(`session-new-${tab.id}`);
+
+  sessionSelector?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleSessionDropdown(tab);
+  });
+
+  sessionNewBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!tab.site?.id) return;
+
+    // Save current session
+    saveCurrentSession(tab);
+
+    // Create new session
+    const newSession = createNewSession(tab.site.id, tab.sessions);
+    tab.activeSessionId = newSession.id;
+    tab.chat = [];
+
+    renderChat(tab);
+    updateSessionBar(tab);
+    closeSessionDropdown();
+    showToast("success", "New Chat", `"${newSession.name}" created`);
+  });
+};
+
+// ========================================
+// Session Dropdown
+// ========================================
+let activeDropdownTabId = null;
+
+const closeSessionDropdown = () => {
+  const existing = document.querySelector(".session-dropdown");
+  if (existing) existing.remove();
+  activeDropdownTabId = null;
+};
+
+// Close dropdown when clicking elsewhere
+document.addEventListener("click", () => {
+  closeSessionDropdown();
+});
+
+const toggleSessionDropdown = (tab) => {
+  // If already open for this tab, close it
+  if (activeDropdownTabId === tab.id) {
+    closeSessionDropdown();
+    return;
+  }
+  closeSessionDropdown();
+  activeDropdownTabId = tab.id;
+
+  const selectorBtn = document.getElementById(`session-selector-${tab.id}`);
+  const sessionBar = document.getElementById(`session-bar-${tab.id}`);
+  if (!selectorBtn || !sessionBar) return;
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "session-dropdown";
+  dropdown.addEventListener("click", (e) => e.stopPropagation());
+
+  // Sort sessions: active first, then by most recent
+  const sortedSessions = [...(tab.sessions || [])].sort((a, b) => {
+    if (a.id === tab.activeSessionId) return -1;
+    if (b.id === tab.activeSessionId) return 1;
+    return b.updatedAt - a.updatedAt;
+  });
+
+  let html = `<div class="session-dropdown-header">
+    <span class="session-dropdown-title">Chat Sessions</span>
+    <span class="session-dropdown-count">${sortedSessions.length} session${sortedSessions.length !== 1 ? "s" : ""}</span>
+  </div>
+  <div class="session-dropdown-list">`;
+
+  for (const session of sortedSessions) {
+    const isActive = session.id === tab.activeSessionId;
+    const msgCount = session.messages?.length || 0;
+    const userMsgCount = session.messages?.filter((m) => m.role === "user").length || 0;
+    const timeAgo = formatSessionDate(session.updatedAt);
+    // Get first user message as preview
+    const firstUserMsg = session.messages?.find((m) => m.role === "user");
+    const preview = firstUserMsg
+      ? firstUserMsg.text.slice(0, 50) + (firstUserMsg.text.length > 50 ? "..." : "")
+      : "Empty session";
+
+    html += `
+      <div class="session-item ${isActive ? "active" : ""}" data-session-id="${session.id}">
+        <div class="session-item-main" data-action="switch" data-session-id="${session.id}">
+          <div class="session-item-top">
+            <span class="session-item-name" data-session-id="${session.id}">${escapeHtml(session.name)}</span>
+            <span class="session-item-time">${timeAgo}</span>
+          </div>
+          <div class="session-item-preview">${escapeHtml(preview)}</div>
+          <div class="session-item-meta">
+            <span>${userMsgCount} message${userMsgCount !== 1 ? "s" : ""}</span>
+            ${isActive ? '<span class="session-active-badge">Active</span>' : ""}
+          </div>
+        </div>
+        <div class="session-item-actions">
+          <button class="session-rename-btn" data-action="rename" data-session-id="${session.id}" title="Rename">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+          <button class="session-delete-btn" data-action="delete" data-session-id="${session.id}" title="Delete">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+            </svg>
+          </button>
+        </div>
+      </div>`;
+  }
+
+  html += `</div>`;
+  dropdown.innerHTML = html;
+
+  // Position dropdown below the session bar
+  sessionBar.style.position = "relative";
+  sessionBar.appendChild(dropdown);
+
+  // Attach event listeners
+  dropdown.querySelectorAll('[data-action="switch"]').forEach((el) => {
+    el.addEventListener("click", () => {
+      const sessionId = el.dataset.sessionId;
+      if (sessionId !== tab.activeSessionId) {
+        switchSession(tab, sessionId);
+      }
+      closeSessionDropdown();
+    });
+  });
+
+  dropdown.querySelectorAll('[data-action="rename"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const sessionId = el.dataset.sessionId;
+      const session = tab.sessions.find((s) => s.id === sessionId);
+      if (!session) return;
+
+      // Replace the session name span with an input
+      const nameSpan = dropdown.querySelector(`.session-item-name[data-session-id="${sessionId}"]`);
+      if (!nameSpan) return;
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "session-rename-input";
+      input.value = session.name;
+      input.addEventListener("click", (ev) => ev.stopPropagation());
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          renameSession(tab, sessionId, input.value);
+          closeSessionDropdown();
+        }
+        if (ev.key === "Escape") {
+          closeSessionDropdown();
+        }
+      });
+      input.addEventListener("blur", () => {
+        renameSession(tab, sessionId, input.value);
+        closeSessionDropdown();
+      });
+
+      nameSpan.replaceWith(input);
+      input.focus();
+      input.select();
+    });
+  });
+
+  dropdown.querySelectorAll('[data-action="delete"]').forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const sessionId = el.dataset.sessionId;
+      deleteSession(tab, sessionId);
+      closeSessionDropdown();
+    });
+  });
 };
 
 // ========================================
@@ -595,6 +937,10 @@ const renderChat = (tab) => {
 const addChatMessage = (tab, role, text, isThinking = false) => {
   tab.chat.push({ role, text, isThinking });
   renderChat(tab);
+  // Auto-save non-thinking messages to persistent session
+  if (!isThinking) {
+    saveCurrentSession(tab);
+  }
 };
 
 const removeThinkingMessage = (tab) => {
